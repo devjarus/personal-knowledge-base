@@ -47,11 +47,16 @@ Read `ARCHITECTURE.md` for the full picture. The important rules:
    `params: Promise<{ slug: string[] }>`. Always `await params` before use.
 5. **No new dependencies** unless the user explicitly approves. Everything
    needed is already in `package.json`. The CLI uses inline ANSI escapes, not
-   a color library.
+   a color library. *(v1.1 note: the shadcn/ui redesign added an approved
+   batch — shadcn primitives, next-themes, @tailwindcss/typography,
+   lucide-react, cmdk, sonner, the Radix deps they pull in, and
+   tw-animate-css. Further additions still need explicit approval.)*
 
 ## Codebase conventions
 
-- **Path aliases:** `@/*` maps to `./src/*`. Use it.
+- **Path aliases:** `@/*` maps to `./src/*`. Use it. shadcn extras:
+  `@/components/ui` for primitives, `@/lib/utils` for `cn()`, `@/hooks` for
+  shadcn hooks.
 - **Module resolution:** `bundler` mode with `.js` extensions on relative
   imports (required for the MCP server's Node ESM mode). When editing, keep
   the `.js` extensions even though the files are `.ts`.
@@ -61,20 +66,53 @@ Read `ARCHITECTURE.md` for the full picture. The important rules:
   route specifically, if the error message contains `KB_S3_BUCKET`, return
   HTTP 400 with that message, not 500. Misconfiguration is user error, not a
   server crash.
+- **Client-side error surfacing (F2 pattern).** When a client component
+  handles a non-OK `fetch` response, parse the body as JSON inside a
+  `try/catch` and surface `parsed.error` if present; fall back to raw text
+  otherwise. This pattern appears in `sync-button.tsx`, `note-editor.tsx`
+  (save + delete), and `notes/new/page.tsx`. Do not simplify it away.
+- **User-facing feedback uses Sonner toasts**, not inline spans. `toast.success`
+  for happy-path, `toast.error` with the parsed `.error` field for failures.
+  Mount `<Toaster />` once in the root layout.
 - **MCP tools:** use `server.registerTool(name, {description, inputSchema}, handler)`.
   Input schemas are zod objects. Errors return `{isError: true, content: [...]}`.
-- **Tailwind:** v4 beta. `@import "tailwindcss"` in `globals.css`. No config file.
-- **No Monaco, no CodeMirror.** The note editor is a plain `<textarea>`.
+- **Tailwind:** v4. `@import "tailwindcss"` in `globals.css`. No config file.
+  Theme tokens live in an `@theme inline` block mapping to OKLCH CSS vars in
+  `:root` and `.dark`. Dark mode uses the `.dark` class (driven by
+  next-themes), NOT the `@media (prefers-color-scheme: dark)` query.
+- **shadcn/ui.** Style=new-york, baseColor=slate, CSS vars on. Never edit
+  `src/components/ui/*` — if you need variants, compose them in wrapper
+  components under `src/components/`. Use `cn()` from `@/lib/utils` for
+  conditional classNames.
+- **Dark mode.** `next-themes` with `attribute="class"`, `defaultTheme="system"`,
+  `enableSystem`, `disableTransitionOnChange`. Root `<html>` MUST have
+  `suppressHydrationWarning`. The ModeToggle lives in the top bar.
+- **Cmd+K palette.** `src/components/command-palette.tsx` is loaded via
+  `dynamic(... { ssr: false })` from `command-palette-loader.tsx` (client
+  boundary — Next 15 forbids `ssr: false` in server components).
+- **Note editor.** Still a shadcn `<Textarea>` — no Monaco, no CodeMirror.
+  Delete confirmation uses `<AlertDialog>`, NOT `window.confirm`.
+- **Route group.** Shell-wrapped pages live under `src/app/(shell)/`. The
+  root `src/app/layout.tsx` only hosts the ThemeProvider + Toaster. If a
+  future route (e.g. an onboarding page) shouldn't have the sidebar, put it
+  outside the `(shell)` group.
 
 ## Verification checklist before marking work complete
 
 1. `pnpm typecheck` — zero errors
-2. `pnpm dev` — boots, `curl localhost:3000` returns 200
-3. `pnpm kb ls` — lists seed notes
-4. `pnpm kb search welcome` — finds welcome.md
-5. `pnpm mcp` — starts; `tools/list` over stdio returns all seven tools
-6. `pnpm kb sync --dry-run` with no `KB_S3_BUCKET` set — returns a clear
+2. `pnpm build` — zero warnings; First Load JS for `/notes/[...slug]` under
+   200 kB (currently ~178 kB after the shadcn redesign)
+3. `pnpm dev` — boots, `curl localhost:3000` returns 200 (the dev server
+   may fall back to 3001 if 3000 is in use; check the "Ready" line)
+4. `pnpm kb ls` — lists seed notes
+5. `pnpm kb search welcome` — finds welcome.md
+6. `pnpm kb tree` — indented tree (not flat) — F1 regression check
+7. `pnpm mcp` — starts; `tools/list` over stdio returns all seven tools
+8. `pnpm kb sync --dry-run` with no `KB_S3_BUCKET` set — returns a clear
    "KB_S3_BUCKET is not set" message and exit code 1, not a stack trace
+9. The Sync button in the top bar (with no `KB_S3_BUCKET`) shows a Sonner
+   toast reading exactly `KB_S3_BUCKET is not set. Configure it in .env to
+   enable sync.` — NOT raw JSON (F2 regression check)
 
 ## What NOT to do
 
@@ -94,15 +132,35 @@ Read `ARCHITECTURE.md` for the full picture. The important rules:
 ## Where things live
 
 ```
-src/core/              # filesystem + search + sync + types (pure Node)
-src/app/               # Next.js App Router (UI and JSON API routes)
-  components/          # 'use client' components, no core imports
-  api/                 # server-only JSON routes, thin wrappers over core
-  notes/[...slug]/     # note viewer + editor
-src/mcp/server.ts      # MCP stdio server, seven tools
-src/cli/index.ts       # commander CLI, eight subcommands
-kb/                    # user notes (or wherever KB_ROOT points)
-.coding-agent/         # orchestrator pipeline workspace (spec, plan, review, learnings)
+src/core/                  # filesystem + search + sync + types (pure Node)
+src/app/                   # Next.js App Router
+  layout.tsx               # root: ThemeProvider + Toaster, no shell
+  globals.css              # Tailwind v4 + shadcn slate OKLCH vars + @plugin typography
+  (shell)/                 # route group: shell-wrapped pages
+    layout.tsx             # SidebarProvider + AppSidebar + TopBar + SidebarInset
+    page.tsx               # home: recent notes as cards
+    notes/new/page.tsx     # create-note form (shadcn Input/Textarea)
+    notes/[...slug]/       # note viewer + editor (server component)
+  api/                     # server-only JSON routes, thin wrappers over core
+src/components/            # feature components (not shadcn primitives)
+  app-sidebar.tsx          # Sidebar wrapper: header (logo + SearchBox), content (TreeNav), footer, rail
+  top-bar.tsx              # sticky top bar: SidebarTrigger, Separator, New note, SyncButton, ModeToggle
+  tree-nav.tsx             # recursive SidebarMenu, uses usePathname for isActive
+  search-box.tsx           # shadcn Input + absolute results dropdown, 150ms debounce
+  note-editor.tsx          # Edit/Preview toggle, Save, Delete via AlertDialog, Sonner toasts
+  sync-button.tsx          # Dry-run/Sync buttons, Sonner toasts, F2 parsing (load-bearing)
+  command-palette.tsx      # Cmd+K CommandDialog, /api/search + actions
+  command-palette-loader.tsx # client boundary for dynamic({ssr:false}) import
+  mode-toggle.tsx          # DropdownMenu with Light/Dark/System
+  theme-provider.tsx       # next-themes wrapper
+  ui/                      # shadcn primitives — DO NOT EDIT
+src/lib/utils.ts           # cn() helper
+src/hooks/                 # shadcn hooks (e.g. useMobile)
+src/mcp/server.ts          # MCP stdio server, seven tools
+src/cli/index.ts           # commander CLI, eight subcommands
+components.json            # shadcn config
+kb/                        # user notes (or wherever KB_ROOT points)
+.coding-agent/             # orchestrator pipeline workspace (spec, plan, review, learnings)
 ```
 
 ## Environment variables

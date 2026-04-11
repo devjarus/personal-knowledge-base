@@ -175,16 +175,20 @@ program
     }
   });
 
-function printTree(node: TreeNode, prefix = "", isLast = true) {
-  const branch = prefix === "" ? "" : isLast ? "└── " : "├── ";
-  const name = node.type === "directory" ? color(node.name + "/", c.blue) : node.name;
-  if (prefix !== "" || node.name) {
+function printTree(node: TreeNode, prefix = "", isLast = true, isRoot = true) {
+  if (isRoot) {
+    if (node.name) {
+      process.stdout.write(`${color(node.name + "/", c.blue)}\n`);
+    }
+  } else {
+    const branch = isLast ? "└── " : "├── ";
+    const name = node.type === "directory" ? color(node.name + "/", c.blue) : node.name;
     process.stdout.write(`${prefix}${branch}${name}\n`);
   }
-  const nextPrefix = prefix + (prefix === "" ? "" : isLast ? "    " : "│   ");
+  const nextPrefix = isRoot ? "" : prefix + (isLast ? "    " : "│   ");
   const children = node.children ?? [];
   children.forEach((child, i) => {
-    printTree(child, nextPrefix, i === children.length - 1);
+    printTree(child, nextPrefix, i === children.length - 1, false);
   });
 }
 

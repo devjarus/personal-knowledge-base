@@ -51,17 +51,43 @@ transports above can be replaced without touching it.
 
 ### `src/app/` — Next.js App Router
 
-- Server components (`page.tsx`, `layout.tsx`, `notes/[...slug]/page.tsx`) import
+- **Root layout** (`src/app/layout.tsx`) hosts only the next-themes
+  `ThemeProvider` and the Sonner `<Toaster />`. `<html suppressHydrationWarning>`
+  is required so next-themes can flip the `.dark` class before React hydrates
+  without triggering a hydration mismatch.
+- **Shell route group** (`src/app/(shell)/`) wraps shell-bearing pages in a
+  shadcn `<SidebarProvider>` + `<AppSidebar />` + `<SidebarInset><TopBar />
+  {children}</SidebarInset>` tree, plus a lazy-loaded `<CommandPaletteLoader />`.
+  If a future route (e.g. onboarding, landing page) shouldn't have the shell,
+  place it outside the `(shell)` group.
+- **Server components** (`page.tsx`, `notes/[...slug]/page.tsx`) import
   directly from `@/core/*` and run on the server only.
-- Client components (`'use client'`) never import core — they talk to API routes.
-- API routes under `src/app/api/*` are thin JSON wrappers over core functions:
+- **Client components** (`'use client'`) never import core — they talk to
+  API routes. Non-OK responses are parsed as JSON and surfaced through
+  Sonner toasts using the F2 pattern (see AGENTS.md).
+- **API routes** under `src/app/api/*` are thin JSON wrappers over core functions:
   - `GET/POST /api/notes`
   - `GET/PUT/DELETE /api/notes/[...slug]` (async params, Next 15)
   - `GET /api/search?q=`
   - `POST /api/sync`
   - `GET /api/tree`
-- Styling: Tailwind v4 via `@import "tailwindcss"` in `globals.css`. No
-  `tailwind.config.js`.
+- **UI layer** is shadcn/ui (style=new-york, baseColor=slate). Primitives
+  under `src/components/ui/` are CLI-generated and must not be edited; feature
+  components compose them under `src/components/`.
+- **Theming.** OKLCH CSS variables for both `:root` (light) and `.dark` (dark),
+  mapped to Tailwind tokens via an `@theme inline` block. Dark mode is driven
+  by next-themes toggling the `.dark` class on `<html>`. No
+  `@media (prefers-color-scheme: dark)` query — that's replaced by user
+  preference with `system` as the default.
+- **Command palette.** `src/components/command-palette.tsx` hosts `cmdk` via
+  shadcn's `<CommandDialog>`, loaded through a `dynamic(..., { ssr: false })`
+  import inside a client-component wrapper (`command-palette-loader.tsx`).
+  This pattern is required because Next 15 forbids `ssr: false` in server
+  components. The palette is code-split into its own chunk so it doesn't hit
+  the First Load JS of any route.
+- **Styling.** Tailwind v4 via `@import "tailwindcss"` in `globals.css`. No
+  `tailwind.config.js`. Typography via `@plugin "@tailwindcss/typography"`;
+  rendered markdown uses `prose prose-slate dark:prose-invert max-w-none`.
 
 ### `src/mcp/server.ts` — MCP stdio server
 

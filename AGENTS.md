@@ -25,10 +25,39 @@ Use **pnpm**, not npm or yarn. Version 9.x. Node 24.
 ```bash
 pnpm install
 pnpm dev          # Next dev server on :3000
-pnpm kb <cmd>     # CLI
-pnpm mcp          # MCP stdio server
+pnpm kb <cmd>     # CLI (or `kb <cmd>` globally after `pnpm link --global`)
+pnpm mcp          # MCP stdio server (or `kb-mcp` globally after link)
 pnpm typecheck    # tsc --noEmit, must be zero errors
 ```
+
+### Global install
+
+`pnpm link --global` exposes two binaries: `kb` and `kb-mcp`. They are thin
+loaders in `bin/kb.mjs` and `bin/mcp.mjs` that spawn `tsx` from the linked
+repo's `node_modules` against `src/cli/index.ts` and `src/mcp/server.ts`
+respectively. They resolve the package root via `import.meta.url`, NOT
+`process.cwd()`, so they work from any directory. Do not change them to use
+`process.cwd()` — that breaks global invocation.
+
+`tsx` stays in `devDependencies`. `pnpm link --global` symlinks to the local
+checkout, so devDeps are available. If this project ever publishes to npm,
+`tsx` must move to `dependencies` OR the CLI/MCP must be precompiled to
+`dist/`.
+
+### Agent integration
+
+`.mcp.json` at the repo root exposes the MCP server to any Claude Code session
+opened in the repo (auto-discovered). It uses `pnpm mcp` as the command so it
+works before `pnpm link --global`. `CLAUDE.md` is a 5-line redirect to this
+file — single source of truth lives here, not there.
+
+### Known limitation: CLI/MCP do not read `.env`
+
+Only the Next.js UI loads `.env` automatically. `pnpm kb` and `pnpm mcp` (and
+the global `kb` / `kb-mcp` bins) read env vars from the shell only. Set
+`KB_ROOT`, `KB_S3_BUCKET`, etc. in `~/.zshrc` or pass them inline. This is a
+real gap and fair game for a future task; until then, document it rather than
+paper over it.
 
 ## Architecture rules
 
@@ -132,6 +161,12 @@ Read `ARCHITECTURE.md` for the full picture. The important rules:
 ## Where things live
 
 ```
+bin/                       # tiny Node loaders for global install (no deps)
+  kb.mjs                   # → tsx src/cli/index.ts
+  mcp.mjs                  # → tsx src/mcp/server.ts (binary name: kb-mcp)
+.mcp.json                  # project-scoped MCP config, auto-loaded by Claude Code
+CLAUDE.md                  # redirect to AGENTS.md (Claude Code looks for this name)
+.nvmrc                     # Node version pin (24)
 src/core/                  # filesystem + search + sync + types (pure Node)
 src/app/                   # Next.js App Router
   layout.tsx               # root: ThemeProvider + Toaster, no shell

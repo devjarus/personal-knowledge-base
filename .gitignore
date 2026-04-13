@@ -12,6 +12,9 @@ tsconfig.tsbuildinfo
 # Coding-agent pipeline workspace (local only)
 .coding-agent/
 
+# Playwright MCP scratch dir (screenshots, traces)
+.playwright-mcp/
+
 # KB content — you probably want to track this separately (its own git repo,
 # iCloud/Dropbox folder, or S3 sync). Uncomment if you do NOT want it in this repo.
 # kb/

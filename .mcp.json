@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "personal-kb": {
+      "command": "pnpm",
+      "args": ["mcp"]
+    }
+  }
+}

@@ -25,6 +25,31 @@ pnpm dev
 The home page lists recent notes. Click `welcome.md` to read or edit it. The
 sidebar has a search box, a tree view, and sync buttons.
 
+## Install globally (optional)
+
+After `pnpm install`, link the package so `kb` and `kb-mcp` work from any directory:
+
+```bash
+pnpm link --global
+```
+
+Now:
+
+```bash
+cd ~/anywhere
+export KB_ROOT=~/notes/kb      # or put this in ~/.zshrc
+kb ls
+kb search project
+kb-mcp                          # stdio MCP server
+```
+
+`pnpm link --global` works on private packages — it just symlinks to this
+checkout. Uninstall with `pnpm uninstall --global personal-knowledge-base`.
+
+> **Note:** The CLI and MCP server do NOT currently read `.env` — only the
+> Next.js UI does. When running `kb` from outside the repo, set `KB_ROOT`
+> (and `KB_S3_BUCKET` if you use sync) in your shell environment, not in `.env`.
+
 ## Configuration
 
 Copy `.env.example` to `.env` and edit:
@@ -80,7 +105,19 @@ Adjust the prefix to match `KB_S3_PREFIX`.
 `pnpm mcp` starts a stdio MCP server exposing seven tools: `list_notes`,
 `read_note`, `write_note`, `delete_note`, `search_notes`, `sync_kb`, `get_tree`.
 
-### Claude Code / Claude Desktop / Cursor
+### Claude Code (project-scoped, auto-loaded)
+
+If you open this repo in Claude Code, the MCP server is already wired up via
+`.mcp.json` at the repo root. No config needed — the `list_notes`, `read_note`,
+`search_notes`, etc. tools are available immediately.
+
+After `pnpm link --global` you can optionally change `.mcp.json` to use
+`"command": "kb-mcp", "args": []`, but the `pnpm mcp` form works without linking.
+
+For Claude Desktop, Cursor, or Claude Code sessions outside the repo, add the
+following to your MCP config:
+
+### Claude Desktop / Cursor / Claude Code (outside repo)
 
 Add to your MCP config (path varies — Claude Desktop is
 `~/Library/Application Support/Claude/claude_desktop_config.json` on macOS):

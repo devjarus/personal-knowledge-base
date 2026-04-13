@@ -142,6 +142,7 @@ Read `ARCHITECTURE.md` for the full picture. The important rules:
 9. The Sync button in the top bar (with no `KB_S3_BUCKET`) shows a Sonner
    toast reading exactly `KB_S3_BUCKET is not set. Configure it in .env to
    enable sync.` — NOT raw JSON (F2 regression check)
+10. `pnpm kb import <scratch-dir> --dry-run` prints a plan summary and lists entries
 
 ## What NOT to do
 

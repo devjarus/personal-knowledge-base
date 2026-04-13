@@ -20,6 +20,7 @@ import {
 } from "../core/fs.js";
 import { searchNotes } from "../core/search.js";
 import { sync } from "../core/sync.js";
+import { importNotes } from "../core/import.js";
 import type { TreeNode } from "../core/types.js";
 
 // Tiny ANSI helpers — no extra dependency.
@@ -235,6 +236,164 @@ program
         for (const f of result.downloaded) process.stdout.write(`  ↓ ${f}\n`);
         for (const f of result.deletedRemote) process.stdout.write(`  ✗remote ${f}\n`);
         for (const f of result.deletedLocally) process.stdout.write(`  ✗local  ${f}\n`);
+      } catch (e) {
+        fail(e instanceof Error ? e.message : String(e));
+      }
+    },
+  );
+
+program
+  .command("import")
+  .description("Import markdown files from an external folder into the KB")
+  .argument("<source>", "source folder path (~ expanded)")
+  .option("--from <date>", "ISO date lower bound (inclusive)")
+  .option("--to <date>", "ISO date upper bound (inclusive)")
+  .option("--no-overwrite", "skip existing targets (default: overwrite)")
+  .option("--dry-run", "print the plan without writing anything")
+  .option(
+    "--ignore <pattern>",
+    "ignore pattern (repeatable; replaces defaults: .* node_modules *.bak *.tmp *.swp *~)",
+    (val: string, acc: string[]) => {
+      acc.push(val);
+      return acc;
+    },
+    [] as string[],
+  )
+  .option("-y, --yes", "skip interactive confirmation")
+  .action(
+    async (
+      source: string,
+      opts: {
+        from?: string;
+        to?: string;
+        overwrite?: boolean; // commander sets false when --no-overwrite is passed
+        dryRun?: boolean;
+        ignore?: string[];
+        yes?: boolean;
+      },
+    ) => {
+      // Expand ~ via os.homedir() (matches API route behavior for AC-19)
+      let srcPath = source;
+      if (srcPath === "~") {
+        srcPath = os.homedir();
+      } else if (srcPath.startsWith("~/")) {
+        srcPath = path.join(os.homedir(), srcPath.slice(2));
+      }
+
+      // Parse --from / --to into Date instances
+      let fromDate: Date | undefined;
+      let toDate: Date | undefined;
+
+      if (opts.from) {
+        fromDate = new Date(opts.from);
+        if (!Number.isFinite(fromDate.getTime())) {
+          fail(`import: invalid --from date: ${opts.from}`);
+        }
+      }
+      if (opts.to) {
+        toDate = new Date(opts.to);
+        if (!Number.isFinite(toDate.getTime())) {
+          fail(`import: invalid --to date: ${opts.to}`);
+        }
+      }
+
+      // commander's --no-overwrite sets opts.overwrite = false.
+      // Absence of the flag leaves opts.overwrite = true (commander default for boolean).
+      // We translate this to undefined→true at the core boundary.
+      const overwrite = opts.overwrite === false ? false : undefined;
+
+      // If --ignore appears at least once, its collected array replaces defaults.
+      // Empty array (flag never used) → undefined → core uses defaults.
+      const ignorePatterns =
+        opts.ignore && opts.ignore.length > 0 ? opts.ignore : undefined;
+
+      // Always dry-run first to build the preview (FR-17)
+      let plan;
+      try {
+        plan = await importNotes({
+          source: srcPath,
+          from: fromDate,
+          to: toDate,
+          overwrite,
+          dryRun: true,
+          ignorePatterns,
+        });
+      } catch (e) {
+        fail(e instanceof Error ? e.message : String(e));
+      }
+
+      // Print dry-run summary (FR-18)
+      const { counts } = plan;
+      const dryPrefix = opts.dryRun ? color("[dry-run] ", c.dim) : "";
+      process.stdout.write(
+        `${dryPrefix}` +
+          `planned: ${color(String(counts.planned), c.green)}  ` +
+          `skipped(exists): ${color(String(counts.skippedExists), c.yellow)}  ` +
+          `skipped(filter): ${color(String(counts.skippedFilter), c.yellow)}  ` +
+          `ignored: ${color(String(counts.skippedIgnored), c.dim)}\n`,
+      );
+
+      // Print first 50 relevant entries (plan + skip-exists)
+      const relevant = plan.entries.filter(
+        (e) => e.status === "plan" || e.status === "skip-exists",
+      );
+      const shown = relevant.slice(0, 50);
+      for (const e of shown) {
+        if (e.status === "plan") {
+          process.stdout.write(
+            `  ${color("+", c.green)} ${color(e.targetRel, c.green)} (from ${e.dateSource})\n`,
+          );
+        } else {
+          process.stdout.write(
+            `  ${color("-", c.yellow)} ${color(e.targetRel, c.yellow)} (skip-exists)\n`,
+          );
+        }
+      }
+      if (relevant.length > 50) {
+        process.stdout.write(
+          `  ${color(`... and ${relevant.length - 50} more`, c.dim)}\n`,
+        );
+      }
+
+      // If --dry-run, exit here
+      if (opts.dryRun) {
+        process.exit(0);
+      }
+
+      // Interactive confirmation
+      if (!process.stdin.isTTY && !opts.yes) {
+        fail("import: non-TTY, use --yes to confirm");
+      }
+
+      if (!opts.yes) {
+        const rl = createInterface({ input: stdin, output: stdout });
+        const ans = await rl.question(
+          `import ${counts.planned} files? [y/N] `,
+        );
+        rl.close();
+        if (ans.trim().toLowerCase() !== "y") {
+          process.stdout.write(color("aborted\n", c.dim));
+          process.exit(0);
+        }
+      }
+
+      // Execute the import
+      try {
+        const result = await importNotes({
+          source: srcPath,
+          from: fromDate,
+          to: toDate,
+          overwrite,
+          dryRun: false,
+          ignorePatterns,
+        });
+        const { counts: rc } = result;
+        process.stdout.write(
+          `planned: ${color(String(rc.planned), c.green)}  ` +
+            `skipped(exists): ${color(String(rc.skippedExists), c.yellow)}  ` +
+            `skipped(filter): ${color(String(rc.skippedFilter), c.yellow)}  ` +
+            `ignored: ${color(String(rc.skippedIgnored), c.dim)}\n`,
+        );
       } catch (e) {
         fail(e instanceof Error ? e.message : String(e));
       }

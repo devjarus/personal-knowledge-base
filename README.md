@@ -149,10 +149,35 @@ pnpm kb rm <path> [--yes]                 # delete (confirms unless --yes)
 pnpm kb search <query>                    # full-text search
 pnpm kb tree                              # print directory tree
 pnpm kb sync [--push|--pull] [--mirror] [--dry-run]
+pnpm kb import <source> [--from <date>] [--to <date>] [--no-overwrite] [--dry-run] [-y]
 pnpm kb mcp                               # start MCP server
 ```
 
 `kb new` will open `$EDITOR` if you're in a TTY and don't pass `--body`.
+
+### Bulk import
+
+Copy markdown files from an external folder into the KB:
+
+```bash
+kb import ~/Documents/obsidian-vault --from 2026-01-01 --dry-run
+kb import ~/Documents/obsidian-vault --from 2026-01-01 --yes
+```
+
+Flags:
+- `--from <date>` / `--to <date>` — ISO date bounds (inclusive). Resolved
+  against frontmatter `updated`, else `created`, else file mtime.
+- `--no-overwrite` — skip existing targets instead of overwriting.
+  Default is overwrite.
+- `--dry-run` — print the plan without writing anything.
+- `-y`, `--yes` — skip the interactive confirmation prompt.
+
+Imported files land under `kb/imports/<source-basename>/...` with
+`imported_from` and `imported_at` frontmatter fields added. Existing
+`created` / `updated` fields are preserved.
+
+The UI also exposes bulk import at `/import` — fill in the source path,
+optionally set a date range, preview the plan, then click Import.
 
 ## Frontmatter schema
 

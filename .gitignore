@@ -15,6 +15,8 @@ tsconfig.tsbuildinfo
 # Playwright MCP scratch dir (screenshots, traces)
 .playwright-mcp/
 
-# KB content — you probably want to track this separately (its own git repo,
-# iCloud/Dropbox folder, or S3 sync). Uncomment if you do NOT want it in this repo.
-# kb/
+# KB content — tracked seed files (welcome.md, README.md) stay tracked
+# because git honors explicit history over .gitignore. But anything else
+# written into kb/ (including imports/) stays local-only. Your real KB
+# lives at $KB_ROOT outside the repo.
+kb/

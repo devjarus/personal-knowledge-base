@@ -404,9 +404,17 @@ program
   .command("mcp")
   .description("Start the MCP server (stdio)")
   .action(() => {
+    // Resolve tsx from this package's node_modules (NOT from PATH) so the
+    // subcommand works after `pnpm link --global` the same way bin/kb.mjs
+    // and bin/mcp.mjs do. Using `spawn("tsx", ...)` would rely on tsx being
+    // in PATH, which is not guaranteed in a global-install context.
     const here = path.dirname(fileURLToPath(import.meta.url));
-    const serverPath = path.resolve(here, "../mcp/server.ts");
-    const child = spawn("tsx", [serverPath], { stdio: "inherit" });
+    const pkgRoot = path.resolve(here, "../..");
+    const tsxBin = path.join(pkgRoot, "node_modules", "tsx", "dist", "cli.mjs");
+    const serverPath = path.join(pkgRoot, "src", "mcp", "server.ts");
+    const child = spawn(process.execPath, [tsxBin, serverPath], {
+      stdio: "inherit",
+    });
     child.on("exit", (code) => process.exit(code ?? 0));
   });
 

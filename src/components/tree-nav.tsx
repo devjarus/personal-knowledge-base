@@ -38,7 +38,10 @@ function DirItem({ node, depth }: { node: TreeNode; depth: number }) {
       {open && (
         <SidebarMenuSub>
           {children.map((child) => (
-            <TreeItem key={child.path || child.name} node={child} depth={depth + 1} />
+            // Use the full relative path as key (never just the basename) so
+            // React can distinguish e.g. two folders both named "workspace"
+            // under different parents. child.path is always set by buildTree.
+            <TreeItem key={child.path} node={child} depth={depth + 1} />
           ))}
         </SidebarMenuSub>
       )}
@@ -99,6 +102,7 @@ function TreeItem({ node, depth }: { node: TreeNode; depth: number }) {
 export function TreeNav() {
   const [tree, setTree] = useState<TreeNode | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const pathname = usePathname();
 
   useEffect(() => {
     let cancelled = false;
@@ -113,7 +117,10 @@ export function TreeNav() {
     return () => {
       cancelled = true;
     };
-  }, []);
+    // Re-fetch when the pathname changes so the tree updates after an import
+    // (combined with router.refresh() in import-form.tsx).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathname]);
 
   if (error) {
     return (
@@ -131,7 +138,10 @@ export function TreeNav() {
   return (
     <SidebarMenu>
       {children.map((child) => (
-        <TreeItem key={child.path || child.name} node={child} depth={0} />
+        // Use the full relative path as key — never the bare basename — so
+        // React won't confuse two nodes that share the same directory name
+        // at different levels (e.g. two "workspace" dirs in different parents).
+        <TreeItem key={child.path} node={child} depth={0} />
       ))}
     </SidebarMenu>
   );

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { ArrowUpDown, ChevronUp, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -106,6 +107,7 @@ function SortHeader({
 // ---------------------------------------------------------------------------
 
 export default function ImportForm() {
+  const router = useRouter();
   const [source, setSource] = useState("");
   const [from, setFrom] = useState(""); // yyyy-mm-dd or ""
   const [to, setTo] = useState(""); // yyyy-mm-dd or ""
@@ -202,6 +204,9 @@ export default function ImportForm() {
       setPlan(p); // update counts to reflect execution result
       // Do NOT re-initialize selectedKeys after import (post-import plan may
       // have skip-unselected rows which are no longer actionable).
+      // Invalidate the server-component cache so the sidebar tree and home
+      // page reflect the newly imported notes without a manual page reload.
+      router.refresh();
     }
   }
 

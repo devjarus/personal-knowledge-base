@@ -99,7 +99,11 @@ export async function writeNote(input: WriteNoteInput): Promise<Note> {
   await fs.mkdir(path.dirname(abs), { recursive: true });
 
   const existing = await readNote(relPath).catch(() => null);
-  const now = new Date().toISOString().slice(0, 10);
+  // Use local date (not UTC) so `kb new` on a PT evening writes today's
+  // local date rather than tomorrow's UTC date.
+  const _d = new Date();
+  const _pad = (n: number) => String(n).padStart(2, "0");
+  const now = `${_d.getFullYear()}-${_pad(_d.getMonth() + 1)}-${_pad(_d.getDate())}`;
   const fm: Frontmatter = {
     ...(existing?.frontmatter ?? {}),
     ...(input.frontmatter ?? {}),

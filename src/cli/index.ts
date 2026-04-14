@@ -157,8 +157,8 @@ program
 
 program
   .command("search")
-  .description("Search notes")
-  .argument("<query...>", "search terms")
+  .description("Search notes. Use tag:<name> to filter by tag (AND across multiple).")
+  .argument("<query...>", "search terms; tag:<name> filters by exact tag")
   .option("-n, --limit <n>", "max results", "20")
   .action(async (query: string[], opts: { limit: string }) => {
     const hits = await searchNotes(query.join(" "), Number(opts.limit) || 20);

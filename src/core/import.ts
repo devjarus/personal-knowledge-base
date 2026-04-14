@@ -13,6 +13,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import matter from "gray-matter";
 import { kbRoot } from "./paths";
+import { _invalidateNotesCache } from "./fs";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -490,7 +491,7 @@ export async function importNotes(opts: ImportOptions): Promise<ImportPlan> {
   };
 
   // -------------------------------------------------------------------------
-  // Step 6: Execute (FR-9) — sequential writes, no Promise.all
+  // Step 6: Execute (FR-9) — bounded-concurrency parallel writes
   // -------------------------------------------------------------------------
 
   if (!opts.dryRun) {
@@ -501,18 +502,27 @@ export async function importNotes(opts: ImportOptions): Promise<ImportPlan> {
         ? new Set(opts.selectedSources)
         : null;
 
+    // Pre-pass: filter unselected entries before concurrent execution so that
+    // count mutations (planned--, skippedUnselected++) are serialized and never
+    // race with the parallel write workers.
     for (const entry of entries) {
       if (entry.status !== "plan") continue;
-
-      // If a selection set is active and this entry is not in it, mark as
-      // skip-unselected and update counts — do not write.
       if (selectedSet !== null && !selectedSet.has(entry.sourceAbs)) {
         entry.status = "skip-unselected";
         plan.counts.planned--;
         plan.counts.skippedUnselected++;
-        continue;
       }
+    }
 
+    // Collect only the entries that still need to be written.
+    const toWrite = entries.filter((e) => e.status === "plan");
+
+    // Bounded-concurrency runner — no external dependency.
+    // Uses a shared queue index consumed by N concurrent workers.
+    // Target concurrency: 16 (I/O-bound; most files are small .md).
+    // Error semantics: first worker failure cancels remaining work by setting
+    // `failed`; workers check it before dequeuing the next item.
+    await runBounded(toWrite, 16, async (entry) => {
       const targetAbs = path.join(kbAbs, entry.targetRel);
 
       try {
@@ -549,7 +559,11 @@ export async function importNotes(opts: ImportOptions): Promise<ImportPlan> {
         const cause = err instanceof Error ? err.message : String(err);
         throw new Error(`import: failed writing ${entry.targetRel}: ${cause}`);
       }
-    }
+    });
+
+    // Successful execute — bust the notes cache so the next listNotes() call
+    // reflects the newly written files without waiting for mtime propagation.
+    _invalidateNotesCache();
   }
 
   // -------------------------------------------------------------------------
@@ -566,4 +580,44 @@ export async function importNotes(opts: ImportOptions): Promise<ImportPlan> {
     plan.counts.skippedUnselected;
 
   return plan;
+}
+
+// ---------------------------------------------------------------------------
+// Bounded-concurrency helper
+//
+// Processes `items` with at most `limit` concurrent workers. Workers share a
+// queue index; each one dequeues the next item until the list is exhausted or
+// a failure occurs. On first error, remaining items are skipped and the error
+// is re-thrown so the caller sees the original message.
+// ---------------------------------------------------------------------------
+
+async function runBounded<T>(
+  items: T[],
+  limit: number,
+  worker: (item: T) => Promise<void>,
+): Promise<void> {
+  let idx = 0;
+  let failed: Error | null = null;
+
+  async function consume(): Promise<void> {
+    while (true) {
+      if (failed) return; // another worker already failed — stop quietly
+      const i = idx++;
+      if (i >= items.length) return;
+      await worker(items[i]).catch((err: unknown) => {
+        // Record only the first failure; subsequent workers will check `failed`
+        // before picking up more work and will exit early.
+        if (!failed) {
+          failed = err instanceof Error ? err : new Error(String(err));
+        }
+      });
+    }
+  }
+
+  const workers = Array.from({ length: Math.min(limit, items.length) }, () =>
+    consume(),
+  );
+  await Promise.all(workers);
+
+  if (failed) throw failed;
 }

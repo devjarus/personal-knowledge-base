@@ -127,6 +127,10 @@ export default function ImportForm() {
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   // Per-row selection — keyed by sourceAbs (AC-R14: default all plan entries selected)
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
+  // Table pagination — show first 200 rows by default to avoid DOM jank on
+  // large plans. Master checkbox and selection counts cover ALL entries, not
+  // just the visible slice. User can expand to see everything with one click.
+  const [showAll, setShowAll] = useState(false);
 
   // -------------------------------------------------------------------------
   // Fetch helper — F2 error-parsing pattern (load-bearing; must not simplify)
@@ -185,6 +189,7 @@ export default function ImportForm() {
     const p = await callImport(true);
     if (p) {
       setPlan(p);
+      setShowAll(false); // reset pagination on new plan
       // AC-R14: default all plan-status entries selected on new dry-run result
       setSelectedKeys(
         new Set(
@@ -505,10 +510,30 @@ export default function ImportForm() {
             </p>
           ) : (
             <>
+              {/* Pagination header — only shown when there are more than 200 rows */}
+              {sortedEntries.length > 200 && (
+                <div className="flex items-center justify-between text-sm text-muted-foreground">
+                  <span>
+                    {showAll
+                      ? `Showing all ${sortedEntries.length} entries`
+                      : `Showing 200 of ${sortedEntries.length} entries`}
+                  </span>
+                  {!showAll && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setShowAll(true)}
+                    >
+                      Show all {sortedEntries.length} entries
+                    </Button>
+                  )}
+                </div>
+              )}
               <Table>
                 <TableHeader>
                   <TableRow>
-                    {/* Checkbox column — master select/deselect */}
+                    {/* Checkbox column — master select/deselect (covers ALL entries, not just visible) */}
                     <TableHead className="w-8">
                       <Checkbox
                         checked={masterChecked}
@@ -559,7 +584,7 @@ export default function ImportForm() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {sortedEntries.slice(0, 200).map((entry, i) => (
+                  {(showAll ? sortedEntries : sortedEntries.slice(0, 200)).map((entry, i) => (
                     <TableRow key={i}>
                       {/* Checkbox cell — only plan entries get an active checkbox */}
                       <TableCell className="w-8">
@@ -606,11 +631,6 @@ export default function ImportForm() {
                   ))}
                 </TableBody>
               </Table>
-              {sortedEntries.length > 200 && (
-                <p className="text-xs text-muted-foreground text-center py-2">
-                  ...and {sortedEntries.length - 200} more
-                </p>
-              )}
             </>
           )}
         </div>

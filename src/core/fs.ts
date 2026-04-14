@@ -26,6 +26,41 @@ async function walkDir(dir: string, out: string[] = []): Promise<string[]> {
   return out;
 }
 
+// ---------------------------------------------------------------------------
+// Module-scoped listNotes() cache
+//
+// Signature = "<count>:<maxMtimeMs>:<totalSize>" — computed from a stat-only
+// walk (no file reads). Cache is keyed on kbRoot() so switching KB_ROOT
+// between calls gets a fresh entry. _invalidateNotesCache() is exported and
+// called from every write path (writeNote, deleteNote, import executor) so
+// a write always triggers a re-read on the next listNotes() call, even if the
+// OS mtime granularity hasn't advanced yet.
+// ---------------------------------------------------------------------------
+
+interface NotesCache {
+  signature: string;
+  summaries: NoteSummary[];
+}
+
+const _cache = new Map<string, NotesCache>();
+
+export function _invalidateNotesCache(): void {
+  _cache.delete(kbRoot());
+}
+
+async function computeSignature(files: string[]): Promise<string> {
+  let maxMtimeMs = 0;
+  let totalSize = 0;
+  await Promise.all(
+    files.map(async (f) => {
+      const st = await fs.stat(f);
+      if (st.mtimeMs > maxMtimeMs) maxMtimeMs = st.mtimeMs;
+      totalSize += st.size;
+    }),
+  );
+  return `${files.length}:${maxMtimeMs}:${totalSize}`;
+}
+
 export async function ensureKbRoot(): Promise<void> {
   await fs.mkdir(kbRoot(), { recursive: true });
 }
@@ -33,7 +68,17 @@ export async function ensureKbRoot(): Promise<void> {
 /** List all notes as summaries, sorted by mtime desc. */
 export async function listNotes(): Promise<NoteSummary[]> {
   await ensureKbRoot();
-  const files = await walkDir(kbRoot());
+  const root = kbRoot();
+  const files = await walkDir(root);
+
+  // Cheap stat-only pass to check whether the KB has changed since last call.
+  const sig = await computeSignature(files);
+  const cached = _cache.get(root);
+  if (cached && cached.signature === sig) {
+    return cached.summaries;
+  }
+
+  // Cache miss — read and parse every file.
   const summaries = await Promise.all(
     files.map(async (abs): Promise<NoteSummary> => {
       const raw = await fs.readFile(abs, "utf8");
@@ -63,6 +108,8 @@ export async function listNotes(): Promise<NoteSummary[]> {
     }),
   );
   summaries.sort((a, b) => (a.mtime < b.mtime ? 1 : -1));
+
+  _cache.set(root, { signature: sig, summaries });
   return summaries;
 }
 
@@ -113,12 +160,14 @@ export async function writeNote(input: WriteNoteInput): Promise<Note> {
 
   const raw = serializeFrontmatter(fm, input.body);
   await fs.writeFile(abs, raw, "utf8");
+  _invalidateNotesCache();
   return readNote(relPath);
 }
 
 export async function deleteNote(relPath: string): Promise<void> {
   const abs = resolveNotePath(withMarkdownExt(relPath));
   await fs.unlink(abs);
+  _invalidateNotesCache();
 }
 
 /** Build a tree representation of the KB directory for UI navigation. */

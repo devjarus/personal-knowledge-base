@@ -21,6 +21,7 @@ import {
 import { searchNotes } from "../core/search.js";
 import { sync } from "../core/sync.js";
 import { importNotes } from "../core/import.js";
+import { kbStats } from "../core/stats.js";
 import type { TreeNode } from "../core/types.js";
 
 // Tiny ANSI helpers — no extra dependency.
@@ -399,6 +400,165 @@ program
       }
     },
   );
+
+// ---------------------------------------------------------------------------
+// Tiny relative-time formatter. No external deps.
+// < 60s → "Xs", < 60m → "Xm", < 24h → "Xh", < 30d → "Xd", else "Xw"
+// ---------------------------------------------------------------------------
+function relTime(iso: string): string {
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const s = Math.round(diffMs / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.round(s / 60);
+  if (m < 60) return `${m}m`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `${h}h`;
+  const d = Math.round(h / 24);
+  if (d < 30) return `${d}d`;
+  return `${Math.round(d / 7)}w`;
+}
+
+program
+  .command("info")
+  .description("Show KB statistics (note count, size, top folders/tags, recent)")
+  .option("--top <n>", "how many top folders/tags to show", "10")
+  .option("--recent <n>", "how many recent notes to show", "5")
+  .option("--json", "emit raw JSON instead of human-readable output")
+  .action(async (opts: { top: string; recent: string; json?: boolean }) => {
+    const topN = Number(opts.top) || 10;
+    const recentN = Number(opts.recent) || 5;
+    let stats;
+    try {
+      stats = await kbStats({ topN, recentN });
+    } catch (e) {
+      fail(e instanceof Error ? e.message : String(e));
+    }
+    if (opts.json) {
+      process.stdout.write(JSON.stringify(stats, null, 2) + "\n");
+      return;
+    }
+
+    // Human-readable output — ANSI colours matching existing commands.
+    const sizeMb = (stats.totalSize / 1_048_576).toFixed(2);
+    const lastWrite = stats.lastUpdated
+      ? ` (last write ${relTime(stats.lastUpdated)} ago)`
+      : "";
+    const lastDate = stats.lastUpdated
+      ? stats.lastUpdated.slice(0, 10)
+      : "—";
+
+    process.stdout.write(
+      `${color("KB root:", c.bold)} ${color(stats.kbRoot, c.blue)} ${color(`(source: ${stats.source})`, c.dim)}\n` +
+      `${color("Notes:", c.bold)}   ${stats.noteCount}\n` +
+      `${color("Size:", c.bold)}    ${sizeMb} MB\n` +
+      `${color("Updated:", c.bold)} ${lastDate}${color(lastWrite, c.dim)}\n`,
+    );
+
+    if (stats.topFolders.length > 0) {
+      process.stdout.write(`\n${color("Top folders:", c.bold)}\n`);
+      const maxCount = stats.topFolders.reduce(
+        (mx, f) => Math.max(mx, f.count),
+        0,
+      );
+      const countWidth = String(maxCount).length;
+      for (const f of stats.topFolders) {
+        process.stdout.write(
+          `  ${color(f.folder.padEnd(24), c.blue)}  ${color(String(f.count).padStart(countWidth), c.dim)}\n`,
+        );
+      }
+    }
+
+    if (stats.topTags.length > 0) {
+      process.stdout.write(`\n${color("Top tags:", c.bold)}\n`);
+      const maxCount = stats.topTags.reduce(
+        (mx, t) => Math.max(mx, t.count),
+        0,
+      );
+      const countWidth = String(maxCount).length;
+      for (const t of stats.topTags) {
+        process.stdout.write(
+          `  ${color(("#" + t.tag).padEnd(24), c.cyan)}  ${color(String(t.count).padStart(countWidth), c.dim)}\n`,
+        );
+      }
+    }
+
+    if (stats.recent.length > 0) {
+      process.stdout.write(
+        `\n${color(`Recent (last ${stats.recent.length} writes):`, c.bold)}\n`,
+      );
+      for (const r of stats.recent) {
+        process.stdout.write(
+          `  ${color(relTime(r.mtime).padEnd(4), c.dim)}  ${color(r.path, c.blue)}\n`,
+        );
+      }
+    }
+  });
+
+// ---------------------------------------------------------------------------
+// Tiny glob-to-regex converter. Supports *, **, ?. No new deps.
+// ---------------------------------------------------------------------------
+function globToRegex(glob: string): RegExp {
+  // Escape regex metachars except * and ?, which we handle specially.
+  let re = "";
+  for (let i = 0; i < glob.length; i++) {
+    const ch = glob[i];
+    if (ch === "*" && glob[i + 1] === "*") {
+      re += ".*"; // ** matches across path separators
+      i++;        // skip the second *
+      // consume a trailing slash so "**/" doesn't produce ".*/" with a required /
+      if (glob[i + 1] === "/") i++;
+    } else if (ch === "*") {
+      re += "[^/]*"; // single * does not cross directory boundaries
+    } else if (ch === "?") {
+      re += "[^/]"; // ? matches exactly one non-separator char
+    } else if (/[.+^${}()|[\]\\]/.test(ch)) {
+      re += "\\" + ch; // escape regex metachars
+    } else {
+      re += ch;
+    }
+  }
+  return new RegExp("^" + re + "$", "i");
+}
+
+program
+  .command("find")
+  .description("Search notes by filename / path (substring or glob)")
+  .argument("<pattern>", "pattern to match against KB-relative paths")
+  .option("--glob", "treat pattern as a glob (supports *, **, ?)")
+  .option("--json", "emit JSON array of note summaries")
+  .action(async (pattern: string, opts: { glob?: boolean; json?: boolean }) => {
+    let notes;
+    try {
+      notes = await listNotes(); // already sorted mtime desc
+    } catch (e) {
+      fail(e instanceof Error ? e.message : String(e));
+    }
+
+    let hits;
+    if (opts.glob) {
+      const re = globToRegex(pattern);
+      hits = notes.filter((n) => re.test(n.path));
+    } else {
+      const lower = pattern.toLowerCase();
+      hits = notes.filter((n) => n.path.toLowerCase().includes(lower));
+    }
+
+    if (opts.json) {
+      process.stdout.write(JSON.stringify(hits, null, 2) + "\n");
+      return;
+    }
+
+    if (hits.length === 0) {
+      process.stdout.write(color("(no matches)\n", c.dim));
+      return;
+    }
+
+    for (const h of hits) {
+      process.stdout.write(
+        `${color(h.path, c.blue)}  ${color(h.title, c.bold)}\n`,
+      );
+    }
+  });
 
 program
   .command("mcp")

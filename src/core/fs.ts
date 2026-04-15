@@ -48,6 +48,16 @@ export function _invalidateNotesCache(): void {
   _cache.delete(kbRoot());
 }
 
+/**
+ * Return the current listNotes cache signature for a given kbRoot path.
+ * Used by links.ts to detect when the KB has changed without re-running
+ * a full listNotes() call — it just compares signatures.
+ * Returns null if no cache entry exists yet for this root.
+ */
+export function _notesCacheSignature(root: string): string | null {
+  return _cache.get(root)?.signature ?? null;
+}
+
 async function computeSignature(files: string[]): Promise<string> {
   let maxMtimeMs = 0;
   let totalSize = 0;

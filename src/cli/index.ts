@@ -22,6 +22,7 @@ import { searchNotes } from "../core/search.js";
 import { sync } from "../core/sync.js";
 import { importNotes } from "../core/import.js";
 import { kbStats } from "../core/stats.js";
+import { buildLinkIndex } from "../core/links.js";
 import type { TreeNode } from "../core/types.js";
 
 // Tiny ANSI helpers — no extra dependency.
@@ -556,6 +557,102 @@ program
     for (const h of hits) {
       process.stdout.write(
         `${color(h.path, c.blue)}  ${color(h.title, c.bold)}\n`,
+      );
+    }
+  });
+
+// ---------------------------------------------------------------------------
+// Seed file names that are excluded from orphan output by default.
+// Match is against the KB-relative path string exactly (case-sensitive).
+// ---------------------------------------------------------------------------
+const ORPHAN_SEED_EXCLUSIONS = new Set(["welcome.md", "README.md"]);
+
+program
+  .command("backlinks")
+  .description(
+    "Show notes that link to <path>. Supports [[wiki]] and [text](path.md) links.",
+  )
+  .argument("<path>", "KB-relative path of the target note")
+  .option("--json", "emit raw JSON array of LinkRef objects")
+  .action(async (notePath: string, opts: { json?: boolean }) => {
+    // Normalize: append .md if missing.
+    const target = notePath.endsWith(".md") ? notePath : `${notePath}.md`;
+
+    let index;
+    try {
+      index = await buildLinkIndex();
+    } catch (e) {
+      fail(e instanceof Error ? e.message : String(e));
+    }
+
+    const refs = index.inbound.get(target) ?? [];
+
+    if (opts.json) {
+      process.stdout.write(JSON.stringify(refs, null, 2) + "\n");
+      return;
+    }
+
+    if (refs.length === 0) {
+      process.stdout.write(color("(no backlinks)\n", c.dim));
+      return;
+    }
+
+    // Group by unique source path so a note linking to the target twice shows once.
+    const bySource = new Map<string, typeof refs>();
+    for (const ref of refs) {
+      const existing = bySource.get(ref.from) ?? [];
+      existing.push(ref);
+      bySource.set(ref.from, existing);
+    }
+
+    for (const [sourcePath, sourceRefs] of bySource) {
+      // Show the first ref's raw link text; append count if multiple.
+      const firstRaw = sourceRefs[0].raw;
+      const kindLabel = sourceRefs[0].kind;
+      const extra = sourceRefs.length > 1 ? ` (+${sourceRefs.length - 1} more)` : "";
+      process.stdout.write(
+        `  ${color(sourcePath, c.blue)}    ${color(firstRaw, c.dim)} ${color(`(${kindLabel})`, c.cyan)}${color(extra, c.dim)}\n`,
+      );
+    }
+  });
+
+program
+  .command("orphans")
+  .description(
+    "List notes with zero inbound links (no [[wiki]] or [text](path.md) references from other notes).",
+  )
+  .option("--all", "include seed files (welcome.md, README.md)")
+  .option("--json", "emit JSON array of NoteSummary objects for the orphans")
+  .action(async (opts: { all?: boolean; json?: boolean }) => {
+    let notes;
+    let index;
+    try {
+      [notes, index] = await Promise.all([listNotes(), buildLinkIndex()]);
+    } catch (e) {
+      fail(e instanceof Error ? e.message : String(e));
+    }
+
+    const orphans = notes.filter((n) => {
+      // A note is an orphan if it has no inbound links.
+      if ((index.inbound.get(n.path) ?? []).length > 0) return false;
+      // Apply seed exclusion unless --all is passed.
+      if (!opts.all && ORPHAN_SEED_EXCLUSIONS.has(n.path)) return false;
+      return true;
+    });
+
+    if (opts.json) {
+      process.stdout.write(JSON.stringify(orphans, null, 2) + "\n");
+      return;
+    }
+
+    if (orphans.length === 0) {
+      process.stdout.write(color("(no orphans)\n", c.dim));
+      return;
+    }
+
+    for (const o of orphans) {
+      process.stdout.write(
+        `${color(o.path, c.blue)}  ${color(o.title, c.bold)}  ${color(`(${relTime(o.mtime)})`, c.dim)}\n`,
       );
     }
   });

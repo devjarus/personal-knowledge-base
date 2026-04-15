@@ -24,6 +24,13 @@ import { importNotes } from "../core/import.js";
 import { kbStats } from "../core/stats.js";
 import { buildLinkIndex } from "../core/links.js";
 import { rebuildIndex, refreshIndex } from "../core/semanticIndex.js";
+import {
+  buildOrganizePlan,
+  applyOrganizePlan,
+  undoLastOrganize,
+  OrganizeError,
+} from "../core/organize.js";
+import type { OrganizePlan, OrganizeMove } from "../core/organize.js";
 import type { TreeNode } from "../core/types.js";
 
 // Tiny ANSI helpers — no extra dependency.
@@ -863,6 +870,321 @@ program
     });
     child.on("exit", (code) => process.exit(code ?? 0));
   });
+
+// ---------------------------------------------------------------------------
+// kb organize — auto-organize KB notes into topical folders.
+//
+// Dry-run by default (no flags → print plan, exit 0).
+// Filesystem is NEVER mutated without --apply.
+// ---------------------------------------------------------------------------
+
+/** Collect repeatable --exclude flags into an array. */
+function collectExclude(val: string, acc: string[]): string[] {
+  acc.push(val);
+  return acc;
+}
+
+// ---------------------------------------------------------------------------
+// Pretty TTY output helpers for organize
+// ---------------------------------------------------------------------------
+
+/** Print the dry-run / plan TTY output. */
+function printOrganizePlan(
+  plan: OrganizePlan,
+  opts: { verbose?: boolean }
+): void {
+  const { verbose } = opts;
+
+  // Header
+  process.stdout.write(
+    `${color("kb organize", c.bold)} ${color("—", c.dim)} ${color("dry-run", c.yellow)}\n`
+  );
+  process.stdout.write(
+    `${color("Total notes scanned:", c.dim)} ${plan.stats.total}\n\n`
+  );
+
+  // Summary block: counts by reason
+  process.stdout.write(`${color("Summary:", c.bold)}\n`);
+  process.stdout.write(
+    `  ${color("by type:", c.dim)}      ${color(String(plan.stats.byType), c.green)}\n` +
+    `  ${color("by tag:", c.dim)}       ${color(String(plan.stats.byTag), c.cyan)}\n` +
+    `  ${color("by cluster:", c.dim)}   ${color(String(plan.stats.byCluster), c.magenta)}\n` +
+    `  ${color("unassigned:", c.dim)}   ${color(String(plan.stats.unassigned), c.dim)}\n` +
+    `  ${color("moves planned:", c.dim)} ${color(String(plan.moves.length), c.bold)}\n\n`
+  );
+
+  // Per-cluster section
+  if (plan.clusters.length > 0) {
+    process.stdout.write(`${color("Clusters:", c.bold)}\n`);
+    for (const cl of plan.clusters) {
+      process.stdout.write(
+        `  ${color(cl.folder + "/", c.blue)}  ` +
+        `${color(`${cl.memberCount} notes`, c.dim)}  ` +
+        `${color(`[${cl.topTerms.slice(0, 3).join(", ")}]`, c.cyan)}\n`
+      );
+
+      // Member list: show first 5 titles (or all with --verbose)
+      const clusterMoves = plan.moves.filter((m) => m.clusterLabel === cl.folder);
+      const shown = verbose ? clusterMoves : clusterMoves.slice(0, 5);
+      for (const m of shown) {
+        process.stdout.write(`    ${color("→", c.dim)} ${color(m.from, c.dim)} → ${color(m.to, c.blue)}\n`);
+      }
+      if (!verbose && clusterMoves.length > 5) {
+        process.stdout.write(
+          `    ${color(`… and ${clusterMoves.length - 5} more`, c.dim)}\n`
+        );
+      }
+    }
+    process.stdout.write("\n");
+  }
+
+  // Per-note moves grouped by target folder (verbose: all; otherwise first 10 per group)
+  if (plan.moves.length > 0) {
+    // Group moves by the first segment of the target path (top-level folder)
+    const byFolder = new Map<string, OrganizeMove[]>();
+    for (const move of plan.moves) {
+      const folder = move.to.split("/")[0] ?? move.to;
+      const existing = byFolder.get(folder) ?? [];
+      existing.push(move);
+      byFolder.set(folder, existing);
+    }
+
+    if (!verbose && byFolder.size > 0) {
+      process.stdout.write(`${color("Planned moves (grouped by target):", c.bold)}\n`);
+      for (const [folder, moves] of byFolder) {
+        process.stdout.write(`  ${color(folder + "/", c.blue)} ${color(`(${moves.length})`, c.dim)}\n`);
+        const shown = moves.slice(0, 10);
+        for (const m of shown) {
+          process.stdout.write(
+            `    ${color(m.from, c.dim)} → ${color(m.to, c.green)}  ${color(`(${m.reason})`, c.cyan)}\n`
+          );
+        }
+        if (moves.length > 10) {
+          process.stdout.write(`    ${color(`… and ${moves.length - 10} more`, c.dim)}\n`);
+        }
+      }
+      process.stdout.write("\n");
+    } else if (verbose) {
+      process.stdout.write(`${color("Planned moves (all):", c.bold)}\n`);
+      for (const m of plan.moves) {
+        process.stdout.write(
+          `  ${color(m.from, c.dim)} → ${color(m.to, c.green)}  ${color(`(${m.reason}, conf=${m.confidence.toFixed(2)})`, c.cyan)}\n`
+        );
+      }
+      process.stdout.write("\n");
+    }
+  }
+
+  // Link-rewrite preview
+  const rewriteFiles = new Set(plan.rewrites.map((r) => r.file)).size;
+  process.stdout.write(
+    `${color("Link rewrites:", c.dim)} would rewrite ${color(String(plan.rewrites.length), c.bold)} references in ${color(String(rewriteFiles), c.bold)} files\n\n`
+  );
+
+  // Footer
+  process.stdout.write(
+    `${color("Run with", c.dim)} ${color("--apply", c.yellow)} ${color("to execute, or", c.dim)} ${color("--json", c.yellow)} ${color("for machine-readable output.", c.dim)}\n`
+  );
+}
+
+/** Handle OrganizeError and unexpected errors uniformly. */
+function handleOrganizeError(
+  e: unknown,
+  jsonMode: boolean
+): never {
+  const msg = e instanceof Error ? e.message : String(e);
+  const isKnown = e instanceof OrganizeError;
+  const showStack = process.env.KB_DEBUG === "1";
+
+  if (jsonMode) {
+    // --json mode: stdout gets JSON error envelope; stderr gets human message.
+    process.stderr.write(`${color("error:", c.red)} ${msg}\n`);
+    process.stdout.write(JSON.stringify({ error: msg }) + "\n");
+  } else {
+    process.stderr.write(`${color("error:", c.red)} ${msg}\n`);
+    if (!isKnown && showStack && e instanceof Error && e.stack) {
+      process.stderr.write(e.stack + "\n");
+    }
+  }
+  process.exit(1);
+}
+
+program
+  .command("organize")
+  .description(
+    "Auto-organize KB notes into topical folders. Dry-run by default — no changes until --apply."
+  )
+  // Execution mode flags (mutually exclusive in practice; --undo wins if both supplied)
+  .option("--apply", "execute the planned moves and link rewrites")
+  .option("--undo", "reverse the most recent applied organize")
+  // Output flags
+  .option("--json", "emit plan/result as JSON (no ANSI, no prompts)")
+  .option("--verbose", "show full per-note move list instead of grouped summary")
+  // Tuning flags
+  .option(
+    "--exclude <glob>",
+    "extra path glob to carve out (repeatable)",
+    collectExclude,
+    [] as string[]
+  )
+  .option("--no-rewrite-links", "skip the link-rewrite pass")
+  .option("--min-confidence <n>", "cluster-confidence threshold (default 0.35)")
+  .option("--max-clusters <n>", "upper bound on cluster count (default auto)")
+  .option("--keep-empty-dirs", "don't sweep empty parent dirs after moves")
+  .action(
+    async (opts: {
+      apply?: boolean;
+      undo?: boolean;
+      json?: boolean;
+      verbose?: boolean;
+      exclude?: string[];
+      rewriteLinks?: boolean; // commander sets false when --no-rewrite-links used
+      minConfidence?: string;
+      maxClusters?: string;
+      keepEmptyDirs?: boolean;
+    }) => {
+      const jsonMode = opts.json === true;
+      const minConf =
+        opts.minConfidence !== undefined ? Number(opts.minConfidence) : undefined;
+      const maxClusters =
+        opts.maxClusters !== undefined ? Number(opts.maxClusters) : undefined;
+
+      // Validate numeric flags.
+      if (minConf !== undefined && (Number.isNaN(minConf) || minConf < 0 || minConf > 1)) {
+        process.stderr.write(`error: --min-confidence must be a number between 0 and 1\n`);
+        process.exit(1);
+      }
+      if (maxClusters !== undefined && (!Number.isInteger(maxClusters) || maxClusters < 1)) {
+        process.stderr.write(`error: --max-clusters must be a positive integer\n`);
+        process.exit(1);
+      }
+
+      // --- UNDO mode ---
+      if (opts.undo) {
+        if (!jsonMode) {
+          process.stdout.write(
+            `${color("kb organize", c.bold)} ${color("—", c.dim)} ${color("undoing", c.yellow)}\n`
+          );
+        }
+        try {
+          const result = await undoLastOrganize();
+
+          if (jsonMode) {
+            process.stdout.write(JSON.stringify(result, null, 2) + "\n");
+          } else {
+            process.stdout.write(
+              `${color("Reverted:", c.green)} ${result.reverted} operations.` +
+              ` Ledger: ${color(result.ledgerPath, c.dim)}\n`
+            );
+            if (result.conflicts.length > 0) {
+              process.stdout.write(
+                `${color(`Conflicts: ${result.conflicts.length} (listed below)`, c.yellow)}\n`
+              );
+              for (const conflict of result.conflicts) {
+                process.stdout.write(
+                  `  ${color(conflict.path, c.dim)} — ${conflict.reason}\n`
+                );
+              }
+            }
+          }
+          return;
+        } catch (e) {
+          handleOrganizeError(e, jsonMode);
+        }
+      }
+
+      // --- DRY-RUN or APPLY: build the plan first ---
+      let plan: OrganizePlan;
+      try {
+        plan = await buildOrganizePlan({
+          mode: "full",
+          exclude: opts.exclude ?? [],
+          minConfidence: minConf,
+          maxClusters,
+          // commander sets opts.rewriteLinks = false when --no-rewrite-links is passed
+          rewriteLinks: opts.rewriteLinks !== false,
+        });
+      } catch (e) {
+        // Map OrganizeError codes to user-friendly messages (spec §6).
+        if (e instanceof OrganizeError) {
+          if (e.code === "MISSING_INDEX_DIR" || e.code === "MISSING_SIDECAR") {
+            const msg = "organize requires an embedding index — run `kb reindex` first.";
+            if (jsonMode) {
+              process.stdout.write(JSON.stringify({ error: msg }) + "\n");
+            }
+            process.stderr.write(`${color("error:", c.red)} ${msg}\n`);
+            process.exit(1);
+          }
+          if (e.code === "LOCK_HELD") {
+            const msg = `${e.message}. If stale, remove .kb-index/organize/.lock.`;
+            if (jsonMode) {
+              process.stdout.write(JSON.stringify({ error: msg }) + "\n");
+            }
+            process.stderr.write(`${color("error:", c.red)} ${msg}\n`);
+            process.exit(1);
+          }
+        }
+        handleOrganizeError(e, jsonMode);
+      }
+
+      // --- DRY-RUN (no --apply) ---
+      if (!opts.apply) {
+        if (jsonMode) {
+          process.stdout.write(JSON.stringify(plan, null, 2) + "\n");
+        } else {
+          printOrganizePlan(plan, { verbose: opts.verbose });
+        }
+        return;
+      }
+
+      // --- APPLY mode ---
+      if (!jsonMode) {
+        process.stdout.write(
+          `${color("kb organize", c.bold)} ${color("—", c.dim)} ${color("applying", c.yellow)}\n`
+        );
+        process.stdout.write(
+          `${color("Planning:", c.dim)} ${plan.moves.length} moves, ${plan.rewrites.length} link rewrites...\n`
+        );
+      }
+
+      try {
+        const result = await applyOrganizePlan(plan, {
+          keepEmptyDirs: opts.keepEmptyDirs,
+        });
+
+        if (jsonMode) {
+          process.stdout.write(JSON.stringify(result, null, 2) + "\n");
+        } else {
+          process.stdout.write(
+            `${color("Applied:", c.green)} ${result.applied} moves, ` +
+            `${color(String(plan.rewrites.length), c.cyan)} link rewrites.\n` +
+            `${color("Ledger:", c.dim)} ${result.ledgerPath}\n` +
+            `${color("Run", c.dim)} ${color("kb organize --undo", c.yellow)} ${color("to reverse.", c.dim)}\n`
+          );
+
+          if (result.skipped.length > 0) {
+            process.stdout.write(
+              `${color(`Skipped: ${result.skipped.length} (content changed since plan):`, c.yellow)}\n`
+            );
+            for (const m of result.skipped) {
+              process.stdout.write(`  ${color(m.from, c.dim)} (not moved)\n`);
+            }
+          }
+        }
+      } catch (e) {
+        // Map lock errors specifically.
+        if (e instanceof OrganizeError && e.code === "LOCK_HELD") {
+          const msg = `${e.message}. If stale, remove .kb-index/organize/.lock.`;
+          if (jsonMode) {
+            process.stdout.write(JSON.stringify({ error: msg }) + "\n");
+          }
+          process.stderr.write(`${color("error:", c.red)} ${msg}\n`);
+          process.exit(1);
+        }
+        handleOrganizeError(e, jsonMode);
+      }
+    }
+  );
 
 program.parseAsync(process.argv).catch((e) => {
   fail(e instanceof Error ? e.message : String(e));

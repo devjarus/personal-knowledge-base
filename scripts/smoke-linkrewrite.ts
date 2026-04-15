@@ -5,7 +5,7 @@
  * runs apply (with link rewrites), verifies zero new broken links,
  * then runs undo and verifies byte-identical restoration.
  *
- * Run: pnpm tsx src/core/__tests__/smoke-linkrewrite.ts
+ * Run: pnpm tsx scripts/smoke-linkrewrite.ts
  */
 
 import { mkdtemp, mkdir, writeFile, readFile, rm, readdir } from "node:fs/promises";
@@ -121,13 +121,13 @@ for (const [k, v] of [...preSnap.entries()].sort()) {
   console.log(`  ${k}:`, v.split("\n")[0]);
 }
 
-// Import modules
+// Import modules — paths are relative to scripts/, so src/core/* is at ../src/core/*
 const { buildOrganizePlan, applyOrganizePlan, undoLastOrganize } = await import(
-  "../organize.js"
+  "../src/core/organize.js"
 );
-const { _invalidateNotesCache } = await import("../fs.js");
-const { _invalidateSemanticCache } = await import("../semanticIndex.js");
-const { _invalidateLinkIndexCache, buildLinkIndex } = await import("../links.js");
+const { _invalidateNotesCache } = await import("../src/core/fs.js");
+const { _invalidateSemanticCache } = await import("../src/core/semanticIndex.js");
+const { _invalidateLinkIndexCache, buildLinkIndex } = await import("../src/core/links.js");
 
 _invalidateNotesCache();
 _invalidateSemanticCache();
@@ -139,7 +139,7 @@ console.log("Moves:");
 for (const m of plan.moves) console.log(`  ${m.from} → ${m.to} (${m.reason})`);
 console.log("Rewrites:");
 for (const r of plan.rewrites) console.log(`  ${r.file}: ${r.before} → ${r.after}`);
-console.log("Unassigned:", plan.unassigned.map((u) => `${u.path}: ${u.reason}`).join(", ") || "(none)");
+console.log("Unassigned:", plan.unassigned.map((u: { path: string; reason: string }) => `${u.path}: ${u.reason}`).join(", ") || "(none)");
 
 // Baseline broken links
 _invalidateLinkIndexCache();

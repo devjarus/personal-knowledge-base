@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { FolderInput, Settings } from "lucide-react";
+import { FolderInput, FolderTree, Settings } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -15,7 +15,7 @@ import {
   SidebarMenuItem,
   SidebarRail,
 } from "@/components/ui/sidebar";
-import { TreeNav } from "@/components/tree-nav";
+import { SidebarRecents } from "@/components/sidebar-recents";
 import { SearchBox } from "@/components/search-box";
 
 export function AppSidebar() {
@@ -36,6 +36,18 @@ export function AppSidebar() {
         <SidebarGroup>
           <SidebarGroupContent>
             <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  tooltip="Browse (Miller columns)"
+                  isActive={pathname.startsWith("/browse")}
+                >
+                  <Link href="/browse" className="gap-2">
+                    <FolderTree className="h-4 w-4 shrink-0 text-muted-foreground" />
+                    <span>Browse</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
               <SidebarMenuItem>
                 <SidebarMenuButton
                   asChild
@@ -63,7 +75,7 @@ export function AppSidebar() {
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
-        <TreeNav />
+        <SidebarRecents />
       </SidebarContent>
       <SidebarFooter className="border-t border-sidebar-border px-4 py-2">
         <div className="text-xs text-muted-foreground">

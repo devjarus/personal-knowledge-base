@@ -204,6 +204,63 @@ export async function deleteNote(relPath: string): Promise<void> {
   _onChange?.("delete", relPath);
 }
 
+/**
+ * Recursively delete a folder under the KB root, including all notes within.
+ *
+ * SAFETY RAILS (bulk delete is destructive — a bug here corrupts user data):
+ *  - Reject empty / root-pointing / absolute paths.
+ *  - Reject paths that escape the KB root after normalization.
+ *  - Reject deleting `.kb-index` (the semantic-index sidecar — use
+ *    `kb reindex --force` to rebuild it instead).
+ *  - The resolved path must be an existing directory, not a file.
+ *
+ * After a successful delete:
+ *  - Invalidate the listNotes() cache.
+ *  - Fire the notes-change hook once per deleted note so the semantic index
+ *    drops those rows. Hook is fire-and-forget (NFR-3).
+ *
+ * Returns the count of .md files that were removed (for user feedback).
+ */
+export async function deleteFolder(relPath: string): Promise<number> {
+  const cleaned = relPath.trim().replace(/^\/+|\/+$/g, "");
+  if (!cleaned || cleaned === "." || cleaned === "/") {
+    throw new Error("deleteFolder: path is empty or points to KB root");
+  }
+  if (path.isAbsolute(cleaned)) {
+    throw new Error("deleteFolder: absolute paths not allowed");
+  }
+  if (cleaned === ".kb-index" || cleaned.startsWith(".kb-index/")) {
+    throw new Error("deleteFolder: .kb-index is managed by kb reindex --force");
+  }
+
+  const root = kbRoot();
+  const abs = path.normalize(path.join(root, cleaned));
+  if (!abs.startsWith(root + path.sep) && abs !== root) {
+    throw new Error("deleteFolder: path escapes KB root");
+  }
+  if (abs === root) {
+    throw new Error("deleteFolder: refusing to delete the KB root itself");
+  }
+
+  const st = await fs.stat(abs).catch(() => null);
+  if (!st) throw new Error(`deleteFolder: ${cleaned} does not exist`);
+  if (!st.isDirectory()) {
+    throw new Error(`deleteFolder: ${cleaned} is not a directory`);
+  }
+
+  // Collect .md files BEFORE rm so the change hook can fire per-note.
+  const filesBefore = await walkDir(abs);
+  const relPaths = filesBefore.map((f) => toRelPath(f));
+
+  await fs.rm(abs, { recursive: true, force: true });
+
+  _invalidateNotesCache();
+  for (const rp of relPaths) {
+    _onChange?.("delete", rp);
+  }
+  return relPaths.length;
+}
+
 /** Build a tree representation of the KB directory for UI navigation. */
 export async function buildTree(): Promise<TreeNode> {
   await ensureKbRoot();

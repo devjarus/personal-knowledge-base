@@ -103,113 +103,145 @@ export interface SyncOptions {
   dryRun?: boolean;
 }
 
+/**
+ * Translate AWS credential-expiry errors into a clear, actionable message.
+ * All other errors pass through unchanged.
+ */
+function friendlyAwsError(err: unknown): Error {
+  if (!(err instanceof Error)) return new Error(String(err));
+  const name = (err as { name?: string }).name ?? "";
+  const msg = err.message ?? "";
+  if (
+    name === "ExpiredToken" ||
+    name === "ExpiredTokenException" ||
+    (/expired/i.test(msg) && /credential|token|session/i.test(msg))
+  ) {
+    return new Error(
+      "AWS credentials are expired. Re-run `aws sso login` (or `aws configure` / refresh your env vars) and try again.",
+    );
+  }
+  return err;
+}
+
 export async function sync(opts: SyncOptions = {}): Promise<SyncResult> {
-  const direction = opts.direction ?? "both";
-  const client = getClient();
-  const { Bucket, Prefix } = bucketConfig();
-  const root = kbRoot();
+  try {
+    const direction = opts.direction ?? "both";
+    const client = getClient();
+    const { Bucket, Prefix } = bucketConfig();
+    const root = kbRoot();
 
-  const [locals, remotes] = await Promise.all([walkLocal(root), listRemote(client)]);
-  const localMap = new Map(locals.map((l) => [l.rel, l]));
+    const [locals, remotes] = await Promise.all([walkLocal(root), listRemote(client)]);
+    const localMap = new Map(locals.map((l) => [l.rel, l]));
 
-  const result: SyncResult = {
-    uploaded: [],
-    downloaded: [],
-    deletedLocally: [],
-    deletedRemote: [],
-    skipped: 0,
-  };
+    const result: SyncResult = {
+      uploaded: [],
+      downloaded: [],
+      deletedLocally: [],
+      deletedRemote: [],
+      skipped: 0,
+    };
 
-  // Upload phase
-  if (direction === "push" || direction === "both") {
-    for (const { rel, abs } of locals) {
-      const remote = remotes.get(rel);
-      const localStat = await fs.stat(abs);
-      const localHash = await md5(abs);
-      const remoteEtag = remote?.ETag?.replace(/"/g, "");
-
-      if (remote && remoteEtag === localHash) {
-        result.skipped++;
-        continue;
-      }
-
-      if (remote && remote.LastModified && direction === "both") {
-        // If remote is newer, let the pull phase handle it.
-        if (remote.LastModified.getTime() > localStat.mtime.getTime()) {
-          continue;
-        }
-      }
-
-      if (!opts.dryRun) {
-        const body = await fs.readFile(abs);
-        await client.send(
-          new PutObjectCommand({
-            Bucket,
-            Key: Prefix + rel,
-            Body: body,
-            ContentType: rel.endsWith(".md") ? "text/markdown; charset=utf-8" : undefined,
-          }),
-        );
-      }
-      result.uploaded.push(rel);
-    }
-  }
-
-  // Download phase
-  if (direction === "pull" || direction === "both") {
-    for (const [rel, remote] of remotes) {
-      const local = localMap.get(rel);
-      if (local) {
-        const localStat = await fs.stat(local.abs);
-        const localHash = await md5(local.abs);
-        const remoteEtag = remote.ETag?.replace(/"/g, "");
-        if (remoteEtag === localHash) continue;
-        if (remote.LastModified && remote.LastModified.getTime() <= localStat.mtime.getTime()) {
-          continue;
-        }
-      }
-
-      if (!opts.dryRun) {
-        const res = await client.send(
-          new GetObjectCommand({ Bucket, Key: Prefix + rel }),
-        );
-        const body = await res.Body?.transformToByteArray();
-        if (!body) continue;
-        const abs = path.join(root, rel);
-        await fs.mkdir(path.dirname(abs), { recursive: true });
-        await fs.writeFile(abs, body);
-      }
-      result.downloaded.push(rel);
-    }
-  }
-
-  // Mirror deletion (opt-in)
-  if (opts.mirror) {
+    // Upload phase
     if (direction === "push" || direction === "both") {
-      for (const rel of remotes.keys()) {
-        if (!localMap.has(rel)) {
-          if (!opts.dryRun) {
-            await client.send(
-              new DeleteObjectCommand({ Bucket, Key: Prefix + rel }),
-            );
-          }
-          result.deletedRemote.push(rel);
-        }
-      }
-    }
-    if (direction === "pull" || direction === "both") {
       for (const { rel, abs } of locals) {
-        if (!remotes.has(rel)) {
-          if (!opts.dryRun) {
-            await fs.unlink(abs);
+        const remote = remotes.get(rel);
+        const localStat = await fs.stat(abs);
+        const localHash = await md5(abs);
+        const remoteEtag = remote?.ETag?.replace(/"/g, "");
+
+        if (remote && remoteEtag === localHash) {
+          result.skipped++;
+          continue;
+        }
+
+        if (remote && remote.LastModified && direction === "both") {
+          // If remote is newer, let the pull phase handle it.
+          if (remote.LastModified.getTime() > localStat.mtime.getTime()) {
+            continue;
           }
-          result.deletedLocally.push(rel);
+        }
+
+        if (!opts.dryRun) {
+          const body = await fs.readFile(abs);
+          await client.send(
+            new PutObjectCommand({
+              Bucket,
+              Key: Prefix + rel,
+              Body: body,
+              ContentType: rel.endsWith(".md") ? "text/markdown; charset=utf-8" : undefined,
+            }),
+          );
+        }
+        result.uploaded.push(rel);
+      }
+    }
+
+    // Download phase
+    if (direction === "pull" || direction === "both") {
+      for (const [rel, remote] of remotes) {
+        const local = localMap.get(rel);
+        if (local) {
+          const localStat = await fs.stat(local.abs);
+          const localHash = await md5(local.abs);
+          const remoteEtag = remote.ETag?.replace(/"/g, "");
+          if (remoteEtag === localHash) continue;
+          if (remote.LastModified && remote.LastModified.getTime() <= localStat.mtime.getTime()) {
+            continue;
+          }
+        }
+
+        if (!opts.dryRun) {
+          const res = await client.send(
+            new GetObjectCommand({ Bucket, Key: Prefix + rel }),
+          );
+          const body = await res.Body?.transformToByteArray();
+          if (!body) continue;
+          const abs = path.join(root, rel);
+          await fs.mkdir(path.dirname(abs), { recursive: true });
+          await fs.writeFile(abs, body);
+        }
+        result.downloaded.push(rel);
+      }
+    }
+
+    // Mirror deletion (opt-in)
+    if (opts.mirror) {
+      if (direction === "push" || direction === "both") {
+        for (const rel of remotes.keys()) {
+          if (!localMap.has(rel)) {
+            if (!opts.dryRun) {
+              await client.send(
+                new DeleteObjectCommand({ Bucket, Key: Prefix + rel }),
+              );
+            }
+            result.deletedRemote.push(rel);
+          }
+        }
+      }
+      if (direction === "pull" || direction === "both") {
+        for (const { rel, abs } of locals) {
+          if (!remotes.has(rel)) {
+            if (!opts.dryRun) {
+              await fs.unlink(abs);
+            }
+            result.deletedLocally.push(rel);
+          }
         }
       }
     }
-  }
 
-  return result;
+    return result;
+  } catch (err: unknown) {
+    // KB_S3_BUCKET missing already has a clear message — only rewrite AWS
+    // credential errors. All other errors pass through as-is.
+    if (
+      err instanceof Error &&
+      err.message.includes("KB_S3_BUCKET is not set")
+    ) {
+      throw err;
+    }
+    throw friendlyAwsError(err);
+  }
 }
 
 export function isSyncConfigured(): boolean {

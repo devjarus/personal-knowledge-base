@@ -54,6 +54,11 @@ export interface ImportPlan {
 export const DEFAULT_IGNORE_PATTERNS: readonly string[] = [
   ".*",
   "node_modules",
+  "venv",
+  ".venv",
+  "site-packages",
+  "__pycache__",
+  "dist-info",    // Python wheel metadata dirs, already covered by site-packages but safe
   "*.bak",
   "*.tmp",
   "*.swp",

@@ -188,6 +188,51 @@ async function runTests(): Promise<void> {
     assert(idxBefore !== idxAfter, "after invalidation, buildLinkIndex() returns a new object");
 
     // -----------------------------------------------------------------------
+    // T5-A: maskInlineCode — single backtick suppresses link
+    // -----------------------------------------------------------------------
+    console.log("\n-- T5-A: maskInlineCode — single backtick --");
+    const { maskInlineCode } = await import("./links.js");
+    const singleTick = "Look at `[[fake-link]]` here.";
+    const maskedSingle = maskInlineCode(singleTick);
+    assert(!maskedSingle.includes("[["), "single-tick backtick span masks [[");
+    assert(maskedSingle.length === singleTick.length, "single-tick: line length preserved");
+
+    // -----------------------------------------------------------------------
+    // T5-B: maskInlineCode — double backtick suppresses link
+    // -----------------------------------------------------------------------
+    console.log("\n-- T5-B: maskInlineCode — double backtick --");
+    const doubleTick = "See ``[[also-fake]]`` for details.";
+    const maskedDouble = maskInlineCode(doubleTick);
+    assert(!maskedDouble.includes("[["), "double-tick backtick span masks [[");
+    assert(maskedDouble.length === doubleTick.length, "double-tick: line length preserved");
+
+    // -----------------------------------------------------------------------
+    // T5-C: maskInlineCode — real link outside backtick is preserved
+    // -----------------------------------------------------------------------
+    console.log("\n-- T5-C: maskInlineCode — real link outside backtick preserved --");
+    const mixedLine = "Look at `code` then [[target-note]].";
+    const maskedMixed = maskInlineCode(mixedLine);
+    assert(maskedMixed.includes("[[target-note]]"), "link outside inline code is preserved after masking");
+    assert(maskedMixed.length === mixedLine.length, "mixed: line length preserved");
+
+    // -----------------------------------------------------------------------
+    // T5-D: parseLinks — inline backtick link does not appear in broken list
+    // -----------------------------------------------------------------------
+    console.log("\n-- T5-D: inline backtick link excluded from broken links --");
+    await writeFile(tmpDir, "backtick-test.md", [
+      "# Backtick Test",
+      "This has `[[not-a-real-link]]` inside code.",
+      "This has a real link [[target-note]].",
+    ].join("\n") + "\n");
+    resetCaches();
+
+    idx = await buildLinkIndex();
+    const backtickBroken = idx.broken.filter((r) => r.from === "backtick-test.md");
+    assertEqual(backtickBroken.length, 0, "inline-backtick fake link does not appear in broken[]");
+    const backtickOutbound = idx.outbound.get("backtick-test.md") ?? [];
+    assertEqual(backtickOutbound.length, 1, "only the real [[target-note]] link is counted");
+
+    // -----------------------------------------------------------------------
     // Integration: end-to-end inbound + outbound + broken counts
     // -----------------------------------------------------------------------
     console.log("\n-- Integration: inbound/outbound/broken summary --");

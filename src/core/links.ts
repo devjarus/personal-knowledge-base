@@ -66,6 +66,44 @@ const MD_RE = /(?<!!)\[([^\]]*)\]\(([^)]+)\)/g;
 const SKIP_SCHEMES = ["http:", "https:", "mailto:", "tel:"];
 
 // ---------------------------------------------------------------------------
+// Inline-backtick masking
+//
+// Replace inline code spans with spaces of the same length before running
+// the wiki/md regexes. This prevents false-positive broken links from text
+// like `[[some-code]]` or `[text](path)` that appear inside inline code.
+//
+// We handle double-backtick spans first (`` `...` ``), then single-backtick
+// spans (` ... `). Both are replaced with spaces to preserve string length
+// so that any subsequent regex match indices remain valid.
+//
+// We do NOT attempt full CommonMark spec compliance — good-enough for our
+// content: handles the common ``code`` and `code` patterns with no newlines.
+// ---------------------------------------------------------------------------
+
+/**
+ * Mask inline backtick code spans in a single line by replacing each span
+ * (including the surrounding backticks) with spaces of the same length.
+ * Handles double-backtick (`` `` `` ) and single-backtick (`` ` ``) spans.
+ * Line length is preserved so regex indices remain meaningful.
+ */
+export function maskInlineCode(line: string): string {
+  // Double-backtick first (`` `...` ``), then single-backtick.
+  // The regex is non-greedy and does not cross newlines (not needed — we
+  // operate line-by-line).
+  let result = line;
+
+  // Replace ``...`` spans (double backtick). Allow inner single backticks
+  // (the canonical CommonMark use — e.g. ``foo`bar``) by using `.+?` instead
+  // of `[^``]`. Newlines still excluded because we operate line-by-line.
+  result = result.replace(/``.+?``/g, (m) => " ".repeat(m.length));
+
+  // Replace `...` spans (single backtick, but not inside already-replaced regions)
+  result = result.replace(/`[^`\n]*?`/g, (m) => " ".repeat(m.length));
+
+  return result;
+}
+
+// ---------------------------------------------------------------------------
 // Parser
 //
 // Sweeps the note body line-by-line, toggling `inCode` on ``` fence lines,
@@ -96,12 +134,18 @@ function parseLinks(body: string): RawLink[] {
     }
     if (inCode) continue;
 
+    // Mask inline backtick code spans to prevent false-positive link matches.
+    const maskedLine = maskInlineCode(line);
+
     // --- Wiki links ---
+    // NOTE: we exec on maskedLine but retrieve raw text from the original line
+    // using match index+length (lengths are preserved by maskInlineCode).
     WIKI_RE.lastIndex = 0;
     let m: RegExpExecArray | null;
-    while ((m = WIKI_RE.exec(line)) !== null) {
-      const raw = m[0]; // [[...]]
-      let content = m[1]; // the part inside [[ ]]
+    while ((m = WIKI_RE.exec(maskedLine)) !== null) {
+      // Use original line for display (masked line has spaces where inline code was)
+      const raw = line.slice(m.index, m.index + m[0].length); // [[...]] from original
+      let content = m[1]; // the part inside [[ ]] (from masked — same content for non-code regions)
 
       // Strip pipe-alias: [[slug|display]] → slug
       const pipeIdx = content.indexOf("|");
@@ -119,8 +163,9 @@ function parseLinks(body: string): RawLink[] {
 
     // --- Markdown links ---
     MD_RE.lastIndex = 0;
-    while ((m = MD_RE.exec(line)) !== null) {
-      const raw = m[0]; // [text](href)
+    while ((m = MD_RE.exec(maskedLine)) !== null) {
+      // Use original line for display; href comes from masked line (same for non-code regions)
+      const raw = line.slice(m.index, m.index + m[0].length); // [text](href) from original
       let href = m[2]; // the URL/path part
 
       // Strip fragment: path.md#anchor → path.md

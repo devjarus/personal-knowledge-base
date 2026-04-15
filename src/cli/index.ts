@@ -58,11 +58,18 @@ program
   .command("ls")
   .description("List notes (optionally scoped to a folder prefix)")
   .argument("[prefix]", "folder prefix to filter by")
-  .action(async (prefix?: string) => {
+  .option("--json", "emit raw JSON array of NoteSummary objects")
+  .action(async (prefix?: string, opts?: { json?: boolean }) => {
     const notes = await listNotes();
     const filtered = prefix
       ? notes.filter((n) => n.path.startsWith(prefix.replace(/\/$/, "") + "/"))
       : notes;
+
+    if (opts?.json) {
+      process.stdout.write(JSON.stringify(filtered, null, 2) + "\n");
+      return;
+    }
+
     if (filtered.length === 0) {
       process.stdout.write(color("(no notes)\n", c.dim));
       return;
@@ -77,13 +84,75 @@ program
 
 program
   .command("cat")
-  .description("Print a note's raw contents")
-  .argument("<path>", "KB-relative path")
-  .action(async (notePath: string) => {
+  .description("Print a note's raw contents (optionally a line range)")
+  .argument("<path>", "KB-relative path, optionally with :N suffix for a single line")
+  .option("--lines <range>", "line range to print, e.g. 5-10 or 42 (1-indexed, inclusive)")
+  .action(async (notePath: string, opts: { lines?: string }) => {
+    // Resolve line anchoring.
+    // Form 1: path.md:42 — split off numeric suffix after the last colon.
+    let resolvedPath = notePath;
+    let lineStart: number | undefined;
+    let lineEnd: number | undefined;
+
+    const colonIdx = notePath.lastIndexOf(":");
+    if (colonIdx > 0) {
+      const suffix = notePath.slice(colonIdx + 1);
+      // Only trigger if the suffix is a positive integer (avoids breaking
+      // paths with colons that don't end in a number).
+      if (/^\d+$/.test(suffix) && Number(suffix) > 0) {
+        resolvedPath = notePath.slice(0, colonIdx);
+        lineStart = Number(suffix);
+        lineEnd = lineStart;
+      }
+    }
+
+    // Form 2: --lines a-b or --lines a
+    if (opts.lines !== undefined && lineStart === undefined) {
+      const rangeStr = opts.lines.trim();
+      const dashIdx = rangeStr.indexOf("-");
+      if (dashIdx > 0) {
+        const a = Number(rangeStr.slice(0, dashIdx));
+        const b = Number(rangeStr.slice(dashIdx + 1));
+        if (!Number.isInteger(a) || !Number.isInteger(b) || a < 1 || b < a) {
+          process.stderr.write(`cat: invalid --lines value: ${opts.lines}\n`);
+          process.exit(1);
+        }
+        lineStart = a;
+        lineEnd = b;
+      } else {
+        const a = Number(rangeStr);
+        if (!Number.isInteger(a) || a < 1) {
+          process.stderr.write(`cat: invalid --lines value: ${opts.lines}\n`);
+          process.exit(1);
+        }
+        lineStart = a;
+        lineEnd = a;
+      }
+    }
+
     try {
-      const note = await readNote(notePath);
-      process.stdout.write(note.raw);
-      if (!note.raw.endsWith("\n")) process.stdout.write("\n");
+      const note = await readNote(resolvedPath);
+      if (lineStart === undefined) {
+        // Full file output (unchanged behaviour)
+        process.stdout.write(note.raw);
+        if (!note.raw.endsWith("\n")) process.stdout.write("\n");
+      } else {
+        const allLines = note.raw.split("\n");
+        const start = lineStart - 1; // 0-indexed
+        const end = Math.min((lineEnd ?? lineStart) - 1, allLines.length - 1);
+        for (let i = start; i <= end; i++) {
+          const lineNum = i + 1;
+          const lineContent = allLines[i] ?? "";
+          if (process.stdout.isTTY) {
+            // Dim 1-indexed line number prefix in TTY
+            process.stdout.write(
+              `${color(String(lineNum).padStart(4), c.dim)}  ${lineContent}\n`,
+            );
+          } else {
+            process.stdout.write(`${lineContent}\n`);
+          }
+        }
+      }
     } catch (e) {
       fail(e instanceof Error ? e.message : String(e));
     }
@@ -162,8 +231,15 @@ program
   .description("Search notes. Use tag:<name> to filter by tag (AND across multiple).")
   .argument("<query...>", "search terms; tag:<name> filters by exact tag")
   .option("-n, --limit <n>", "max results", "20")
-  .action(async (query: string[], opts: { limit: string }) => {
+  .option("--json", "emit raw JSON array of SearchHit objects")
+  .action(async (query: string[], opts: { limit: string; json?: boolean }) => {
     const hits = await searchNotes(query.join(" "), Number(opts.limit) || 20);
+
+    if (opts.json) {
+      process.stdout.write(JSON.stringify(hits, null, 2) + "\n");
+      return;
+    }
+
     if (hits.length === 0) {
       process.stdout.write(color("(no hits)\n", c.dim));
       return;
@@ -654,6 +730,50 @@ program
       process.stdout.write(
         `${color(o.path, c.blue)}  ${color(o.title, c.bold)}  ${color(`(${relTime(o.mtime)})`, c.dim)}\n`,
       );
+    }
+  });
+
+program
+  .command("broken")
+  .description(
+    "List broken links (target=null). Groups by source for human view; flat array for --json.",
+  )
+  .option("--json", "emit raw JSON array of LinkRef objects")
+  .action(async (opts: { json?: boolean }) => {
+    let index;
+    try {
+      index = await buildLinkIndex();
+    } catch (e) {
+      fail(e instanceof Error ? e.message : String(e));
+    }
+
+    const broken = index.broken;
+
+    if (opts.json) {
+      process.stdout.write(JSON.stringify(broken, null, 2) + "\n");
+      return;
+    }
+
+    if (broken.length === 0) {
+      process.stdout.write(color("(no broken links)\n", c.dim));
+      return;
+    }
+
+    // Group by source path — same style as backlinks command.
+    const bySource = new Map<string, typeof broken>();
+    for (const ref of broken) {
+      const existing = bySource.get(ref.from) ?? [];
+      existing.push(ref);
+      bySource.set(ref.from, existing);
+    }
+
+    for (const [sourcePath, refs] of bySource) {
+      process.stdout.write(`${color(sourcePath, c.blue)}\n`);
+      for (const ref of refs) {
+        process.stdout.write(
+          `  ${color(ref.raw, c.dim)}  ${color(`(${ref.kind})`, c.cyan)}\n`,
+        );
+      }
     }
   });
 

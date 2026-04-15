@@ -1,6 +1,8 @@
 import { notFound } from "next/navigation";
-import { readNote } from "@/core/fs";
+import Link from "next/link";
+import { readNote, listNotes } from "@/core/fs";
 import { deriveTitle } from "@/core/frontmatter";
+import { buildLinkIndex } from "@/core/links";
 import { NoteEditor } from "@/components/note-editor";
 
 export const dynamic = "force-dynamic";
@@ -19,6 +21,26 @@ export default async function NotePage({
   } catch {
     notFound();
   }
+
+  // Build link index and look up inbound refs for this note.
+  // listNotes() and buildLinkIndex() are both cached — cheap on repeated renders.
+  const [allNotes, linkIndex] = await Promise.all([listNotes(), buildLinkIndex()]);
+
+  // Build a map of path → title for source-note lookups (one pass, O(n)).
+  const titleByPath = new Map<string, string>(
+    allNotes.map((n) => [n.path, n.title]),
+  );
+
+  // Inbound refs pointing at the current note, sorted by source title (case-insensitive).
+  const inboundRefs = (linkIndex.inbound.get(note.path) ?? []).slice().sort(
+    (a, b) =>
+      (titleByPath.get(a.from) ?? a.from)
+        .toLowerCase()
+        .localeCompare((titleByPath.get(b.from) ?? b.from).toLowerCase()),
+  );
+
+  // Count broken outbound links from this note (T3 — fits well under 20 lines).
+  const brokenCount = linkIndex.broken.filter((r) => r.from === note.path).length;
 
   const title = deriveTitle(note.frontmatter, note.body, note.slug);
   const fmEntries = Object.entries(note.frontmatter);
@@ -49,6 +71,35 @@ export default async function NotePage({
             </div>
           ))}
         </dl>
+        <div className="pt-2 border-t">
+          <div className="font-semibold text-muted-foreground uppercase tracking-wide mb-2">
+            backlinks
+          </div>
+          {inboundRefs.length === 0 ? (
+            <div className="text-muted-foreground">(no backlinks)</div>
+          ) : (
+            <ul className="space-y-1">
+              {inboundRefs.map((ref) => (
+                <li key={ref.from}>
+                  <Link
+                    href={`/notes/${ref.from.replace(/\.md$/, "")}`}
+                    className="text-foreground underline underline-offset-2 hover:text-primary break-words"
+                  >
+                    {titleByPath.get(ref.from) ?? ref.from}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
+          {brokenCount > 0 && (
+            <div
+              className="mt-2 text-muted-foreground"
+              aria-label={`${brokenCount} broken outbound link${brokenCount === 1 ? "" : "s"} from this note`}
+            >
+              {brokenCount} broken link{brokenCount === 1 ? "" : "s"}
+            </div>
+          )}
+        </div>
         <div className="pt-2 border-t">
           <div className="text-muted-foreground">size</div>
           <div className="font-mono">{note.size} bytes</div>

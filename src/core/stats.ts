@@ -2,9 +2,9 @@
  * KB stats helper — pure data computation on top of listNotes() + resolveKbRoot().
  * No filesystem access beyond what listNotes() already performs.
  */
-import { listNotes } from "./fs.js";
-import { resolveKbRoot } from "./paths.js";
-import type { KbRootSource } from "./paths.js";
+import { listNotes } from "./fs";
+import { resolveKbRoot } from "./paths";
+import type { KbRootSource } from "./paths";
 
 export interface KbStats {
   kbRoot: string;

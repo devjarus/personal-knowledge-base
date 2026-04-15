@@ -13,8 +13,8 @@
  */
 
 import path from "node:path";
-import { listNotes, readNote, _notesCacheSignature } from "./fs.js";
-import { kbRoot } from "./paths.js";
+import { listNotes, readNote, _notesCacheSignature } from "./fs";
+import { kbRoot } from "./paths";
 
 // ---------------------------------------------------------------------------
 // Public types

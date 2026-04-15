@@ -85,6 +85,22 @@ Read `ARCHITECTURE.md` for the full picture. The important rules:
    semantic search — explicitly approved. Further additions still need explicit
    approval.)*
 
+### Generated artifact: `.trash/`
+
+Soft-delete bin. `deleteNote` and `deleteFolder` **never** call `fs.unlink` or
+`fs.rm` on user content — they `rename` the target into
+`<KB_ROOT>/.trash/<ISO-timestamp>/<original-rel-path>`. The real filesystem
+files survive every delete; only the visible KB tree changes.
+
+- Excluded from `listNotes()` / `buildTree()` walks (`IGNORED` set in `fs.ts`).
+- `moveToTrash()` sweeps empty parent directories up to (but never including)
+  the KB root after a file move — keeps the visible tree tidy.
+- Recovery: `mv <KB_ROOT>/.trash/<timestamp>/<path> <KB_ROOT>/<path>`.
+- Not auto-pruned. Clearing is a user decision (`rm -rf .trash/` or a
+  future `kb trash empty` command). Explicit > automatic for destructive ops.
+- `deleteFolder` refuses to operate on `.trash` itself — no deleting the bin
+  via the API. Same for `.kb-index`.
+
 ### Generated artifact: `.kb-index/`
 
 `<KB_ROOT>/.kb-index/embeddings.jsonl` is the semantic embedding sidecar. It

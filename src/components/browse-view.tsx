@@ -263,9 +263,9 @@ export function BrowseView({
           <AlertDialogHeader>
             <AlertDialogTitle>Delete {confirm?.label}?</AlertDialogTitle>
             <AlertDialogDescription>
-              This permanently removes files from <code>KB_ROOT</code>. Can&apos;t be
-              undone from here — use <code>git</code> or your backup if you need to
-              recover.
+              Files are moved to <code>{"<KB_ROOT>/.trash/<timestamp>/"}</code> —
+              not removed from disk. To recover, <code>mv</code> them back from
+              that directory. To free space, clear <code>.trash/</code> manually.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

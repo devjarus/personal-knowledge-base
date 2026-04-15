@@ -3,7 +3,7 @@
  *
  * Phase 1: pure plan-building (classifier + clustering). No filesystem writes.
  * Phase 2: applyOrganizePlan + ledger + move execution + undo.
- * Phase 3 (future): link rewriting.
+ * Phase 3: link rewriting — rewrite links that would break after moves.
  *
  * Public API is locked across all phases (see plan.md "Locked public API").
  */
@@ -32,7 +32,8 @@ import {
   findLatestLedger,
   ledgerDir,
 } from "./organize/ledger.js";
-import type { LedgerMoveRecord } from "./organize/ledger.js";
+import type { LedgerMoveRecord, LedgerRewriteRecord } from "./organize/ledger.js";
+import { computeLinkRewrites, applyLinkRewrites, undoLinkRewrites } from "./organize/rewriteLinks.js";
 
 // ---------------------------------------------------------------------------
 // Public types — locked cross-phase contract
@@ -403,11 +404,21 @@ export async function buildOrganizePlan(opts: BuildPlanOptions): Promise<Organiz
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // Phase 3: Compute link rewrites for all planned moves.
+  // rewriteLinks: false → skip (user wants to audit breakage with kb broken).
+  // ---------------------------------------------------------------------------
+
+  let rewrites: LinkRewrite[] = [];
+  if (opts.rewriteLinks !== false && moves.length > 0) {
+    rewrites = await computeLinkRewrites(moves, root);
+  }
+
   return {
     generatedAt: new Date().toISOString(),
     mode: opts.mode,
     moves,
-    rewrites: [], // Phase 3 fills this in
+    rewrites,
     unassigned,
     clusters: clusterSummaries,
     stats: {
@@ -546,6 +557,18 @@ export async function applyOrganizePlan(
     // --- 7. Invalidate notes cache once (bulk invalidation) ---
     _invalidateNotesCache();
 
+    // --- Phase 3: Apply link rewrites after all moves succeed ---
+    // Rewrites run AFTER all moves because:
+    //   a) The files that are moved need to be at their new paths before we can write to them.
+    //   b) Links in non-moved files that point to moved notes need the final post-move paths.
+    // On failure of individual rewrites, we do NOT roll back moves — record failures to stderr.
+    // The user can always undo via undoLastOrganize which reverses rewrites + moves.
+    // LOAD-BEARING: plan.rewrites uses post-move file paths for the file field
+    // (set by computeLinkRewrites). applyLinkRewrites writes to those post-move paths.
+    if (plan.rewrites.length > 0) {
+      await applyLinkRewrites(plan.rewrites, lp, root);
+    }
+
     // --- 8. Write commit record ---
     await appendRecord(lp, {
       kind: "commit",
@@ -609,6 +632,19 @@ export async function undoLastOrganize(): Promise<UndoResult> {
     const moveRecords = records.filter(
       (r): r is LedgerMoveRecord => r.kind === "move"
     );
+    const rewriteRecords = records.filter(
+      (r): r is LedgerRewriteRecord => r.kind === "rewrite"
+    );
+
+    // --- Phase 3: Undo link rewrites FIRST (before undoing moves) ---
+    // LOAD-BEARING ordering: rewrites reference post-move file paths (move.to).
+    // We must un-rewrite while files are still at their moved locations,
+    // THEN undo the moves to restore the original file positions.
+    // undoLinkRewrites applies rewrite reversal in reverse-ledger-entry order
+    // per file (descending byte offset) to keep offsets valid.
+    if (rewriteRecords.length > 0) {
+      await undoLinkRewrites(rewriteRecords, root);
+    }
 
     // Undo in reverse order (last move first) — important for overlapping paths.
     const toReverse = [...moveRecords].reverse();

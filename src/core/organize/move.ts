@@ -48,7 +48,8 @@ export async function moveNote(opts: MoveNoteOpts): Promise<void> {
     if ((err as NodeJS.ErrnoException).code === "EXDEV") {
       // Cross-device move: fall back to copy + remove.
       // LOAD-BEARING: this matches moveToTrash's EXDEV handling exactly.
-      await fs.cp(absSource, absTarget, { recursive: true });
+      // preserveTimestamps: true — maintain mtime for incremental drift detection (nit #4).
+      await fs.cp(absSource, absTarget, { recursive: true, preserveTimestamps: true });
       await fs.rm(absSource, { recursive: true, force: true });
     } else {
       throw err;

@@ -169,6 +169,50 @@ manually.
    enable sync.` — NOT raw JSON (F2 regression check)
 10. `pnpm kb import <scratch-dir> --dry-run` prints a plan summary and lists entries
 
+## Dogfooding
+
+This repo's own `kb` CLI is how agents should navigate the user's KB during
+any work session. The KB is the agent's working memory — session notes,
+backlogs, learnings, and project context all live as markdown files there.
+Treat it as such.
+
+**Before starting work:**
+
+1. Set `KB_ROOT` in your shell. The CLI/MCP do not read `.env` (see "Known
+   limitation" above). Typical path: `export KB_ROOT=~/Documents/kb`.
+2. Orient yourself: `kb info` for corpus shape, `kb ls | head` for recent
+   activity, `kb search "<relevant topic>"` for prior context.
+3. If the user mentioned a file or topic, follow the link graph:
+   `kb cat <path>` → `kb backlinks <path>` → `kb search` on surfaced terms.
+4. Check `meta/` for session-status, improvement-backlog, and review notes
+   from prior runs. Resume from the most recent.
+
+**During work:**
+
+- Prefer `kb search` over raw `grep`: it does hybrid keyword+semantic ranking.
+- Use `kb search "term" --json` when you need to pipe results.
+- Use `tag:<name>` in queries to hard-filter (e.g. `kb search "tag:meta"`).
+- `kb find <glob>` is for filename lookup; `kb search` is for content.
+- `kb orphans` and `kb broken` surface link-graph hygiene issues.
+
+**After shipping:**
+
+- Write a session note back to the KB via `kb new meta/session-<date>.md`
+  with: what shipped, what's next, anything surprising. Closing the loop
+  is non-optional — it's how the next agent session boots.
+- If `kb` itself felt clunky (confusing output, missing flag, bad default),
+  log it to `meta/improvement-backlog-*.md`. Do NOT paper over rough edges
+  silently; the whole point of dogfooding is surfacing them.
+
+**What counts as a `kb` UX complaint** (log, don't ignore):
+
+- Output is ambiguous, noisy (stderr leaks, `[embeddings] loading…` bleed),
+  or hard to scan
+- Scores/timestamps have absurd precision
+- A flag you reached for doesn't exist
+- A command's JSON shape is inconsistent with its sibling commands
+- `kb info`-style summaries collapse too aggressively to be useful
+
 ## What NOT to do
 
 - Do not rewrite `src/core/*`. It is functionally complete for v1. Extend it

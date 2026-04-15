@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/sidebar";
 import { SidebarRecents } from "@/components/sidebar-recents";
 import { SearchBox } from "@/components/search-box";
+import { TrashButton } from "@/components/trash-button";
 
 export function AppSidebar() {
   const pathname = usePathname();
@@ -77,8 +78,9 @@ export function AppSidebar() {
         </SidebarGroup>
         <SidebarRecents />
       </SidebarContent>
-      <SidebarFooter className="border-t border-sidebar-border px-4 py-2">
-        <div className="text-xs text-muted-foreground">
+      <SidebarFooter className="flex flex-col gap-2 border-t border-sidebar-border px-3 py-2">
+        <TrashButton />
+        <div className="px-1 text-xs text-muted-foreground">
           local · markdown · S3 sync
         </div>
       </SidebarFooter>

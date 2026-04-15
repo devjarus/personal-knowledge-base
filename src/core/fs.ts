@@ -69,6 +69,81 @@ async function moveToTrash(absSource: string, relPath: string): Promise<void> {
   }
 }
 
+/**
+ * Trash stats: count of timestamped batches and total .md files waiting in
+ * `.trash/`. Used by the sidebar footer + confirm dialog. Returns zeros if
+ * the trash dir doesn't exist yet.
+ */
+export async function getTrashStats(): Promise<{
+  batches: number;
+  files: number;
+}> {
+  const root = kbRoot();
+  const trashRoot = path.join(root, TRASH_DIR);
+  let entries;
+  try {
+    entries = await fs.readdir(trashRoot, { withFileTypes: true });
+  } catch (err: unknown) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      return { batches: 0, files: 0 };
+    }
+    throw err;
+  }
+  const batchDirs = entries.filter((e) => e.isDirectory());
+  let files = 0;
+  for (const batch of batchDirs) {
+    // Walk each batch with a local walker that does NOT respect IGNORED —
+    // trashed content may include files starting with `.` or names that
+    // match the IGNORED set, but inside `.trash/` we want the raw count.
+    files += await countMdFiles(path.join(trashRoot, batch.name));
+  }
+  return { batches: batchDirs.length, files };
+}
+
+async function countMdFiles(dir: string): Promise<number> {
+  let count = 0;
+  let entries;
+  try {
+    entries = await fs.readdir(dir, { withFileTypes: true });
+  } catch {
+    return 0;
+  }
+  for (const entry of entries) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      count += await countMdFiles(full);
+    } else if (entry.isFile() && entry.name.endsWith(".md")) {
+      count += 1;
+    }
+  }
+  return count;
+}
+
+/**
+ * Permanently delete everything in `.trash/`. This is the ONLY function in
+ * core/fs.ts that calls `fs.rm` on user-adjacent content, and it is narrowly
+ * scoped to the trash bin:
+ *   - Only operates on the exact path `<KB_ROOT>/.trash`.
+ *   - Re-verifies the path is under the current `kbRoot()` before rm.
+ *   - Silently no-ops if the trash dir is missing.
+ *
+ * Returns the file count purged (for user-facing feedback). Safe to call
+ * concurrently with deletes — a fresh `.trash/<new-timestamp>/` will just
+ * be created by the next `moveToTrash` call.
+ */
+export async function emptyTrash(): Promise<{ files: number }> {
+  const root = kbRoot();
+  const trashRoot = path.join(root, TRASH_DIR);
+  // Explicit re-verification — defence in depth. The only correct parent is
+  // the current kbRoot; refuse anything else.
+  if (path.dirname(trashRoot) !== root) {
+    throw new Error("emptyTrash: refusing — trash path is not under KB root");
+  }
+  const { files } = await getTrashStats();
+  await fs.rm(trashRoot, { recursive: true, force: true });
+  return { files };
+}
+
 async function walkDir(dir: string, out: string[] = []): Promise<string[]> {
   let entries;
   try {

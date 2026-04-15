@@ -103,8 +103,9 @@ manually.
   notes).
 - First use triggers a ~23MB model download to `$XDG_CACHE_HOME/huggingface/`
   (NOT inside the KB root). Subsequent cold starts load the model in <2s.
-  A "loading model" log line is emitted to stderr on first use; it is silent
-  on subsequent warm calls.
+  Lifecycle messages (`[embeddings] loading model…` / `model ready`) are
+  gated behind `KB_DEBUG=1` so they don't leak into interactive search
+  output. Load **failures** are always surfaced to stderr regardless.
 
 ## Codebase conventions
 

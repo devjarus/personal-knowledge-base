@@ -37,17 +37,47 @@ export async function kbStats(opts?: {
 
   const lastUpdated = notes.length > 0 ? notes[0].mtime : null;
 
-  // --- Top folders: first path segment only, "(root)" for top-level notes ---
-  const folderCounts = new Map<string, number>();
+  // --- Top folders: two-level drill-down ---
+  // First pass: first-segment buckets. If any single bucket dominates (>50% of
+  // notes) we swap it out for its second-segment children so the user sees
+  // meaningful structure instead of one monolithic "imports" row. Root-level
+  // notes stay under "(root)". Notes one level deep keep their first-segment
+  // name (no second level exists).
+  const firstLevel = new Map<string, string[]>();
   for (const n of notes) {
-    const slash = n.path.indexOf("/");
-    const folder = slash === -1 ? "(root)" : n.path.slice(0, slash);
-    folderCounts.set(folder, (folderCounts.get(folder) ?? 0) + 1);
+    const parts = n.path.split("/");
+    const key = parts.length === 1 ? "(root)" : parts[0];
+    const bucket = firstLevel.get(key) ?? [];
+    bucket.push(n.path);
+    firstLevel.set(key, bucket);
   }
-  const topFolders = [...folderCounts.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, topN)
-    .map(([folder, count]) => ({ folder, count }));
+
+  const DOMINANT_RATIO = 0.5;
+  const expanded: { folder: string; count: number }[] = [];
+  for (const [folder, paths] of firstLevel) {
+    const shouldExpand =
+      folder !== "(root)" &&
+      notes.length > 0 &&
+      paths.length / notes.length > DOMINANT_RATIO;
+    if (!shouldExpand) {
+      expanded.push({ folder, count: paths.length });
+      continue;
+    }
+    // Break this bucket into second-level groups under "folder/sub".
+    const subCounts = new Map<string, number>();
+    for (const p of paths) {
+      const parts = p.split("/");
+      const subKey = parts.length >= 3 ? `${parts[0]}/${parts[1]}` : parts[0];
+      subCounts.set(subKey, (subCounts.get(subKey) ?? 0) + 1);
+    }
+    for (const [sub, count] of subCounts) {
+      expanded.push({ folder: sub, count });
+    }
+  }
+
+  const topFolders = expanded
+    .sort((a, b) => b.count - a.count)
+    .slice(0, topN);
 
   // --- Top tags: frequency desc ---
   const tagCounts = new Map<string, number>();

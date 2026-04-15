@@ -247,7 +247,7 @@ program
     }
     for (const h of hits) {
       process.stdout.write(
-        `${color(h.path, c.blue)}  ${color(h.title, c.bold)}  ${color(`(${h.score})`, c.dim)}\n`,
+        `${color(h.path, c.blue)}  ${color(h.title, c.bold)}  ${color(`(${h.score.toFixed(3)})`, c.dim)}\n`,
       );
       if (h.snippet) {
         process.stdout.write(`  ${color(h.snippet.replace(/\s+/g, " ").trim(), c.dim)}\n`);
@@ -682,13 +682,20 @@ program
       bySource.set(ref.from, existing);
     }
 
+    // Build a path → title lookup so we can show the source note title next to
+    // its path — scans better than raw paths alone (dogfooding issue #4).
+    const summaries = await listNotes();
+    const titleByPath = new Map(summaries.map((s) => [s.path, s.title]));
+
     for (const [sourcePath, sourceRefs] of bySource) {
       // Show the first ref's raw link text; append count if multiple.
       const firstRaw = sourceRefs[0].raw;
       const kindLabel = sourceRefs[0].kind;
       const extra = sourceRefs.length > 1 ? ` (+${sourceRefs.length - 1} more)` : "";
+      const title = titleByPath.get(sourcePath) ?? "";
+      const titleCol = title ? `  ${color(title, c.bold)}` : "";
       process.stdout.write(
-        `  ${color(sourcePath, c.blue)}    ${color(firstRaw, c.dim)} ${color(`(${kindLabel})`, c.cyan)}${color(extra, c.dim)}\n`,
+        `  ${color(sourcePath, c.blue)}${titleCol}    ${color(firstRaw, c.dim)} ${color(`(${kindLabel})`, c.cyan)}${color(extra, c.dim)}\n`,
       );
     }
   });

@@ -32,12 +32,21 @@ export function isEmbedderWarm(): boolean {
   return _warm;
 }
 
+/**
+ * Log lifecycle messages only when KB_DEBUG is truthy. Load failures are ALWAYS
+ * logged — silent failure modes are worse than a stray line.
+ * Previously these leaked into every interactive `kb search` invocation.
+ */
+function debugLog(msg: string): void {
+  if (process.env.KB_DEBUG) process.stderr.write(msg);
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function loadPipeline(): Promise<any> {
   if (_pipelinePromise) return _pipelinePromise;
 
   const t0 = Date.now();
-  process.stderr.write(`[embeddings] loading model ${EMBEDDING_MODEL}…\n`);
+  debugLog(`[embeddings] loading model ${EMBEDDING_MODEL}…\n`);
 
   _pipelinePromise = (pipeline as (
     task: string,
@@ -51,10 +60,10 @@ function loadPipeline(): Promise<any> {
   }).then((p) => {
     _warm = true;
     const elapsed = Date.now() - t0;
-    process.stderr.write(`[embeddings] model ready (${elapsed}ms)\n`);
+    debugLog(`[embeddings] model ready (${elapsed}ms)\n`);
     return p;
   }).catch((err: unknown) => {
-    // Reset so the next call can retry.
+    // Reset so the next call can retry. Load failures are ALWAYS surfaced.
     _pipelinePromise = null;
     process.stderr.write(
       `[embeddings] failed to load model: ${err instanceof Error ? err.message : String(err)}\n`

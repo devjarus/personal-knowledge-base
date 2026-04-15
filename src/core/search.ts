@@ -42,6 +42,21 @@ import type { SearchHit } from "./types";
 const HYBRID_ALPHA = 0.4;
 
 /**
+ * Minimum cosine similarity for a pure-semantic hit (no keyword score) to
+ * enter results. Without this, nonsense queries like "xyzzy quantum foobar"
+ * still pull in notes at the score floor (~0.4 * 0 + 0.6 * low-cosine) just
+ * because SOMETHING has to come back top-K. Below this threshold the note
+ * is assumed irrelevant.
+ *
+ * 0.3 was picked empirically against the live KB: thematic matches for
+ * "caching strategies", "pipeline architecture", etc. land 0.3+, while
+ * random-word queries sit in the 0.15–0.28 range. Tuneable if it shuts
+ * out legitimate hits; the escape hatch is `KB_SEMANTIC=off` to get raw
+ * keyword-only behaviour.
+ */
+const MIN_SEMANTIC_COSINE = 0.3;
+
+/**
  * Whether to emit the semantic-fallback warning at most once per process.
  * Using a Set keyed on process pid + root to avoid spamming on repeated calls.
  */
@@ -221,6 +236,9 @@ export async function searchNotes(query: string, limit = 30): Promise<SearchHit[
       const summaryByPath = new Map(summaries.map((s) => [s.path, s]));
       for (const { path: p, cosine } of topKResults) {
         if (keywordPaths.has(p)) continue;
+        // Drop low-similarity pure-semantic hits so nonsense queries return
+        // empty rather than "(no hits)"-worthy noise (dogfooding issue #5).
+        if (cosine < MIN_SEMANTIC_COSINE) continue;
         const s = summaryByPath.get(p);
         if (!s) continue;
 

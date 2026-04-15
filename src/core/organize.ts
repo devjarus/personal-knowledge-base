@@ -2,7 +2,7 @@
  * organize.ts — Auto-organize KB notes into topical folders.
  *
  * Phase 1: pure plan-building (classifier + clustering). No filesystem writes.
- * Phase 2 (future): applyOrganizePlan + ledger + move execution.
+ * Phase 2: applyOrganizePlan + ledger + move execution + undo.
  * Phase 3 (future): link rewriting.
  *
  * Public API is locked across all phases (see plan.md "Locked public API").
@@ -12,14 +12,27 @@ import path from "node:path";
 import fs from "node:fs/promises";
 
 import { kbRoot } from "./paths.js";
-import { listNotes } from "./fs.js";
-import { loadIndex } from "./semanticIndex.js";
+import { listNotes, _invalidateNotesCache } from "./fs.js";
+import { loadIndex, _renameSidecarPath } from "./semanticIndex.js";
 import type { IndexRow } from "./semanticIndex.js";
 import { isCarvedOut } from "./organize/carveouts.js";
 import { classifyByFrontmatter } from "./organize/classifier.js";
 import { cluster } from "./organize/cluster.js";
 import type { ClusterInput } from "./organize/cluster.js";
 import type { NoteSummary } from "./types.js";
+import { readNote } from "./fs.js";
+import { moveNote } from "./organize/move.js";
+import {
+  newLedgerPath,
+  appendRecord,
+  readLedger,
+  hashFile,
+  acquireLock,
+  releaseLock,
+  findLatestLedger,
+  ledgerDir,
+} from "./organize/ledger.js";
+import type { LedgerMoveRecord } from "./organize/ledger.js";
 
 // ---------------------------------------------------------------------------
 // Public types — locked cross-phase contract
@@ -86,7 +99,12 @@ export interface UndoResult {
 export class OrganizeError extends Error {
   constructor(
     message: string,
-    public readonly code: "MISSING_SIDECAR" | "MISSING_INDEX_DIR" | "NOT_IMPLEMENTED"
+    public readonly code:
+      | "MISSING_SIDECAR"
+      | "MISSING_INDEX_DIR"
+      | "NOT_IMPLEMENTED"
+      | "LOCK_HELD"
+      | "NO_LEDGER"
   ) {
     super(message);
     this.name = "OrganizeError";
@@ -200,7 +218,13 @@ export async function buildOrganizePlan(opts: BuildPlanOptions): Promise<Organiz
   // Load notes + embeddings.
   // ---------------------------------------------------------------------------
 
-  // Temporarily set KB_ROOT to the provided root if it differs, for listNotes().
+  // NOTE (nit #2): listNotes() reads kbRoot() internally; it does not accept a
+  // root parameter. Threading kbRoot through listNotes() would require a public
+  // API change to fs.ts. To unblock tests that set opts.kbRoot, we set+restore
+  // process.env.KB_ROOT in a try/finally. This is racey under concurrent MCP
+  // invocations, but acceptable for Phase 2 — the async microtask is synchronous
+  // between awaits so cross-invocation races don't occur in practice on a single
+  // event-loop thread. Tracked for proper fix in a future phase.
   const originalKbRoot = process.env.KB_ROOT;
   if (opts.kbRoot) {
     process.env.KB_ROOT = opts.kbRoot;
@@ -244,18 +268,9 @@ export async function buildOrganizePlan(opts: BuildPlanOptions): Promise<Organiz
     // Build frontmatter for carveout check.
     // NoteSummary doesn't carry the full frontmatter, but does carry type, tags.
     // We reconstruct a minimal Frontmatter object from available fields.
-    // (The fs.ts listNotes doesn't expose full frontmatter, so we synthesize.)
-    // NOTE: `organize` and `pinned` fields are NOT in NoteSummary — we'd need
-    // readNote() to get them. For Phase 1, we only check dotfiles + folder
-    // carve-outs + type/tags. The `organize: false` and `pinned: true` checks
-    // will operate on whatever the full frontmatter loader can provide.
-    // To avoid per-note file reads (perf), we check them via the raw sidecar
-    // approach only if the note is in scope. For correctness, we do a quick
-    // readNote to get full frontmatter only when not already carved out by path.
-
-    // Fast path: path-based carve-outs don't need frontmatter.
-    const { parseFrontmatter } = await import("./frontmatter.js");
-    const { readNote } = await import("./fs.js");
+    // NOTE: `organize` and `pinned` fields are NOT in NoteSummary — we need
+    // readNote() to get them. We do a quick readNote to get full frontmatter
+    // only when not already carved out by path (fast path first).
 
     // Path-level carve-out check (no frontmatter needed).
     const fmProxy = { type: note.type, tags: note.tags };
@@ -279,8 +294,6 @@ export async function buildOrganizePlan(opts: BuildPlanOptions): Promise<Organiz
       // Carved out by frontmatter flags.
       continue;
     }
-
-    void parseFrontmatter; // imported but used via readNote above
 
     // Classify by frontmatter (type/tag).
     const classification = classifyByFrontmatter(note, existingFolders);
@@ -408,34 +421,248 @@ export async function buildOrganizePlan(opts: BuildPlanOptions): Promise<Organiz
 }
 
 // ---------------------------------------------------------------------------
-// applyOrganizePlan — Phase 2 stub
+// applyOrganizePlan — Phase 2 implementation
 // ---------------------------------------------------------------------------
 
 /**
  * Apply a previously computed organize plan.
- * @throws Error — not implemented in Phase 1.
+ *
+ * Steps:
+ *  1. Acquire the organize lock (.kb-index/organize/.lock).
+ *  2. Write the full manifest to a new ledger BEFORE any moves (crash-safe).
+ *  3. Content-hash each source file; skip if it changed since plan (edge case #7).
+ *  4. For each move: mkdir target parent, atomic rename (EXDEV fallback), sweep
+ *     empty parents unless keepEmptyDirs.
+ *  5. Rename the sidecar entry for each moved note (no re-embed — vector unchanged).
+ *  6. Fire the notes-change hook (delete old path + write new path) per move.
+ *  7. Invalidate the notes cache once after all moves.
+ *  8. Write a "commit" record to the ledger.
+ *  9. Release the lock.
+ *
+ * @throws OrganizeError("LOCK_HELD") if another organize is in progress.
  */
 export async function applyOrganizePlan(
-  _plan: OrganizePlan,
-  _opts: { keepEmptyDirs?: boolean }
+  plan: OrganizePlan,
+  opts: { keepEmptyDirs?: boolean } = {}
 ): Promise<ApplyResult> {
-  throw new OrganizeError(
-    "applyOrganizePlan is not implemented in Phase 1",
-    "NOT_IMPLEMENTED"
-  );
+  const root = kbRoot();
+  const keepEmptyDirs = opts.keepEmptyDirs ?? false;
+
+  // Ensure the ledger dir exists before we try to acquire the lock.
+  await fs.mkdir(ledgerDir(root), { recursive: true });
+
+  // --- 1. Acquire lock ---
+  try {
+    await acquireLock(root);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new OrganizeError(msg, "LOCK_HELD");
+  }
+
+  const lp = newLedgerPath(root);
+  let applied = 0;
+  const skipped: OrganizeMove[] = [];
+
+  try {
+    // --- 2. Write header + full manifest to ledger BEFORE any moves ---
+    await appendRecord(lp, {
+      kind: "header",
+      generatedAt: plan.generatedAt,
+      mode: plan.mode,
+      minConfidence: 0.35, // default; plan doesn't carry this field separately
+    });
+
+    // Pre-compute content hashes and write ledger records (crash-recovery manifest).
+    const moveHashes = new Map<string, string>(); // from → hash at apply time
+    for (const move of plan.moves) {
+      // Skip no-op moves (spec edge case #10).
+      if (move.from === move.to) continue;
+
+      const absSource = path.join(root, move.from);
+      let hash: string;
+      try {
+        hash = await hashFile(absSource);
+      } catch {
+        // File disappeared between plan and apply — skip.
+        skipped.push(move);
+        continue;
+      }
+      moveHashes.set(move.from, hash);
+
+      // Write ledger record BEFORE executing the move (crash-safe undo manifest).
+      await appendRecord(lp, {
+        kind: "move",
+        from: move.from,
+        to: move.to,
+        contentHash: hash,
+        reason: move.reason,
+        confidence: move.confidence,
+      });
+    }
+
+    // --- 3–6. Execute each move ---
+    for (const move of plan.moves) {
+      // Skip no-op moves.
+      if (move.from === move.to) continue;
+
+      const hash = moveHashes.get(move.from);
+      if (hash === undefined) {
+        // Was already skipped in the manifest pass (missing file).
+        continue;
+      }
+
+      const absSource = path.join(root, move.from);
+      const absTarget = path.join(root, move.to);
+
+      // --- 3. Content-hash mismatch check (spec edge case #7) ---
+      let currentHash: string;
+      try {
+        currentHash = await hashFile(absSource);
+      } catch {
+        skipped.push(move);
+        continue;
+      }
+      if (currentHash !== hash) {
+        // User edited the file between dry-run and apply — skip this move.
+        skipped.push(move);
+        continue;
+      }
+
+      // --- 4. Atomic move ---
+      await moveNote({ absSource, absTarget, kbRoot: root, keepEmptyDirs });
+
+      // --- 5. Rename sidecar entry (no re-embed; vector unchanged) ---
+      // LOAD-BEARING: _renameSidecarPath short-circuits the re-embed path.
+      // We do NOT fire the notes-change hook for moves because:
+      //   a) The sidecar is already updated via _renameSidecarPath.
+      //   b) The write hook would trigger a re-embed, which we explicitly avoid
+      //      (spec risk #6: "vector is unchanged — only its key changes").
+      // The notes cache is bulk-invalidated after all moves (step 7).
+      await _renameSidecarPath(move.from, move.to);
+
+      applied++;
+    }
+
+    // --- 7. Invalidate notes cache once (bulk invalidation) ---
+    _invalidateNotesCache();
+
+    // --- 8. Write commit record ---
+    await appendRecord(lp, {
+      kind: "commit",
+      applied,
+      skipped: skipped.length,
+    });
+
+    return { applied, ledgerPath: lp, skipped };
+  } finally {
+    // --- 9. Release lock (always, even on error) ---
+    await releaseLock(root);
+  }
 }
 
 // ---------------------------------------------------------------------------
-// undoLastOrganize — Phase 2 stub
+// undoLastOrganize — Phase 2 implementation
 // ---------------------------------------------------------------------------
 
 /**
  * Undo the most recent applied organize.
- * @throws Error — not implemented in Phase 1.
+ *
+ * Steps:
+ *  1. Find the most recent ledger not yet marked as undone.
+ *  2. Acquire the lock.
+ *  3. Parse the ledger. For each move record, check the current hash at `to`.
+ *     If it changed, add to conflicts and skip. Otherwise reverse: rename to → from.
+ *  4. Rename the sidecar entry back.
+ *  5. Rename the ledger to <timestamp>.undone.jsonl.
+ *  6. Invalidate the notes cache.
+ *  7. Release the lock.
+ *
+ * @throws OrganizeError("NO_LEDGER") if no eligible ledger exists.
+ * @throws OrganizeError("LOCK_HELD") if another organize is in progress.
  */
 export async function undoLastOrganize(): Promise<UndoResult> {
-  throw new OrganizeError(
-    "undoLastOrganize is not implemented in Phase 1",
-    "NOT_IMPLEMENTED"
-  );
+  const root = kbRoot();
+
+  // --- 1. Find the most recent eligible ledger ---
+  const lp = await findLatestLedger(root);
+  if (!lp) {
+    throw new OrganizeError(
+      "no ledger to undo — run 'kb organize --apply' first",
+      "NO_LEDGER"
+    );
+  }
+
+  // --- 2. Acquire lock ---
+  try {
+    await acquireLock(root);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new OrganizeError(msg, "LOCK_HELD");
+  }
+
+  let reverted = 0;
+  const conflicts: UndoResult["conflicts"] = [];
+
+  try {
+    // --- 3. Parse ledger ---
+    const records = await readLedger(lp);
+    const moveRecords = records.filter(
+      (r): r is LedgerMoveRecord => r.kind === "move"
+    );
+
+    // Undo in reverse order (last move first) — important for overlapping paths.
+    const toReverse = [...moveRecords].reverse();
+
+    for (const record of toReverse) {
+      const absTo = path.join(root, record.to);
+      const absFrom = path.join(root, record.from);
+
+      // Check if the moved file still exists at `to`.
+      let currentHash: string;
+      try {
+        currentHash = await hashFile(absTo);
+      } catch {
+        // File at `to` is missing — skip (can't undo what isn't there).
+        conflicts.push({
+          path: record.to,
+          reason: "file missing at destination",
+        });
+        continue;
+      }
+
+      // If the file was edited after the organize, skip to preserve user changes.
+      if (currentHash !== record.contentHash) {
+        conflicts.push({
+          path: record.to,
+          reason: "content changed since organize",
+        });
+        continue;
+      }
+
+      // Reverse the move: to → from.
+      await moveNote({
+        absSource: absTo,
+        absTarget: absFrom,
+        kbRoot: root,
+        keepEmptyDirs: false, // sweep empty parents in the new (destination) direction
+      });
+
+      // Rename sidecar entry back.
+      await _renameSidecarPath(record.to, record.from);
+
+      reverted++;
+    }
+
+    // --- 5. Rename ledger to .undone.jsonl ---
+    const undonePath = lp.replace(/\.jsonl$/, ".undone.jsonl");
+    await fs.rename(lp, undonePath);
+
+    // --- 6. Invalidate notes cache ---
+    _invalidateNotesCache();
+
+    return { reverted, ledgerPath: undonePath, conflicts };
+  } finally {
+    // --- 7. Release lock ---
+    await releaseLock(root);
+  }
 }

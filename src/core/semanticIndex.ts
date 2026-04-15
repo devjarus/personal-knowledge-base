@@ -336,6 +336,33 @@ export async function upsertOne(relPath: string): Promise<void> {
 }
 
 /**
+ * Rename the sidecar key for a moved note WITHOUT re-embedding.
+ *
+ * Called by applyOrganizePlan / undoLastOrganize (organize.ts Phase 2).
+ * The embedding vector is unchanged — only the path key in the sidecar
+ * needs updating (spec risk #6: short-circuit re-embed).
+ *
+ * If oldPath is not in the index, this is a no-op (the note may not have
+ * been embedded yet — that's fine, undo/apply still works on the file level).
+ */
+export async function _renameSidecarPath(
+  oldPath: string,
+  newPath: string,
+): Promise<void> {
+  const root = kbRoot();
+  const index = await loadIndex();
+  const row = index.get(oldPath);
+  if (!row) return; // no embedding row — nothing to rename
+  index.delete(oldPath);
+  index.set(newPath, { ...row, path: newPath });
+  await writeSidecar(index);
+  // Refresh cache key so subsequent loadIndex() calls see the updated map.
+  await listNotes();
+  const notesSig = _notesCacheSignature(root) ?? "";
+  _cache.set(root, { notesSig, index });
+}
+
+/**
  * Drop a single note's row (used by the deleteNote hook in T4).
  * Cheap: just removes a row from the in-memory map and rewrites sidecar.
  */

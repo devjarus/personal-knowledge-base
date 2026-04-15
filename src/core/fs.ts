@@ -4,7 +4,8 @@ import { kbRoot, resolveNotePath, toRelPath, withMarkdownExt } from "./paths";
 import { parseFrontmatter, serializeFrontmatter, deriveTitle } from "./frontmatter";
 import type { Frontmatter, Note, NoteSummary, TreeNode } from "./types";
 
-const IGNORED = new Set([".git", "node_modules", ".DS_Store", ".obsidian"]);
+// .kb-index is the semantic index sidecar directory — never treat as note content.
+const IGNORED = new Set([".git", "node_modules", ".DS_Store", ".obsidian", ".kb-index"]);
 
 async function walkDir(dir: string, out: string[] = []): Promise<string[]> {
   let entries;
@@ -46,6 +47,24 @@ const _cache = new Map<string, NotesCache>();
 
 export function _invalidateNotesCache(): void {
   _cache.delete(kbRoot());
+}
+
+// ---------------------------------------------------------------------------
+// Notes-change hook (T4)
+//
+// `semanticIndex.ts` registers a callback here on module load to keep the
+// embedding sidecar fresh after writes/deletes. `fs.ts` does NOT import
+// `semanticIndex.ts` — the callback direction prevents the circular dep.
+// Fire-and-forget: hook is called synchronously but not awaited, so write
+// latency is bounded (FR-4, NFR-3).
+// ---------------------------------------------------------------------------
+
+type NotesChangeHook = (event: "write" | "delete", relPath: string) => void;
+let _onChange: NotesChangeHook | null = null;
+
+/** Register (or clear) a callback invoked after every writeNote / deleteNote. */
+export function _registerNotesChangeHook(h: NotesChangeHook | null): void {
+  _onChange = h;
 }
 
 /**
@@ -171,6 +190,9 @@ export async function writeNote(input: WriteNoteInput): Promise<Note> {
   const raw = serializeFrontmatter(fm, input.body);
   await fs.writeFile(abs, raw, "utf8");
   _invalidateNotesCache();
+  // Fire-and-forget hook so write latency stays bounded (NFR-3).
+  // semanticIndex.ts registers this hook to keep the embedding sidecar fresh.
+  _onChange?.("write", relPath);
   return readNote(relPath);
 }
 
@@ -178,6 +200,8 @@ export async function deleteNote(relPath: string): Promise<void> {
   const abs = resolveNotePath(withMarkdownExt(relPath));
   await fs.unlink(abs);
   _invalidateNotesCache();
+  // Fire-and-forget hook so delete latency stays bounded (NFR-3).
+  _onChange?.("delete", relPath);
 }
 
 /** Build a tree representation of the KB directory for UI navigation. */

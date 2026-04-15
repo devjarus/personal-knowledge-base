@@ -23,6 +23,7 @@ import { sync } from "../core/sync.js";
 import { importNotes } from "../core/import.js";
 import { kbStats } from "../core/stats.js";
 import { buildLinkIndex } from "../core/links.js";
+import { rebuildIndex, refreshIndex } from "../core/semanticIndex.js";
 import type { TreeNode } from "../core/types.js";
 
 // Tiny ANSI helpers — no extra dependency.
@@ -774,6 +775,67 @@ program
           `  ${color(ref.raw, c.dim)}  ${color(`(${ref.kind})`, c.cyan)}\n`,
         );
       }
+    }
+  });
+
+// ---------------------------------------------------------------------------
+// kb reindex — rebuild the semantic embedding sidecar (T6)
+// ---------------------------------------------------------------------------
+
+program
+  .command("reindex")
+  .description("Rebuild the semantic embedding index (incremental by default)")
+  .option("--force", "rebuild every row from scratch (re-embed all notes)")
+  .action(async (opts: { force?: boolean }) => {
+    if (opts.force) {
+      // Full rebuild with per-note progress indicator.
+      const isTTY = process.stderr.isTTY;
+      let lastLen = 0;
+
+      const onProgress = (done: number, total: number, notePath: string) => {
+        const msg = `[${done}/${total}] ${notePath}`;
+        if (isTTY) {
+          // Overwrite the same line via carriage return.
+          process.stderr.write(`\r${msg.padEnd(lastLen)}`);
+          lastLen = msg.length;
+        } else {
+          process.stderr.write(`${msg}\n`);
+        }
+      };
+
+      let result;
+      try {
+        result = await rebuildIndex(onProgress);
+      } catch (e) {
+        if (isTTY) process.stderr.write("\n");
+        process.stderr.write(
+          `${color("reindex failed:", c.red)} ${e instanceof Error ? e.message : String(e)}\n`
+        );
+        process.exit(1);
+      }
+
+      if (isTTY) process.stderr.write("\n"); // newline after progress line
+      process.stdout.write(
+        `${color("indexed:", c.green)} ${result.indexed}  ` +
+          `${color("skipped:", c.yellow)} ${result.skipped}  ` +
+          `${color("time:", c.dim)} ${(result.durationMs / 1000).toFixed(1)}s\n`
+      );
+    } else {
+      // Incremental refresh.
+      let result;
+      try {
+        result = await refreshIndex();
+      } catch (e) {
+        process.stderr.write(
+          `${color("reindex failed:", c.red)} ${e instanceof Error ? e.message : String(e)}\n`
+        );
+        process.exit(1);
+      }
+      process.stdout.write(
+        `${color("added:", c.green)} ${result.added}  ` +
+          `${color("updated:", c.cyan)} ${result.updated}  ` +
+          `${color("removed:", c.yellow)} ${result.removed}\n`
+      );
     }
   });
 

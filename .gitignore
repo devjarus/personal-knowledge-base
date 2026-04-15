@@ -20,3 +20,8 @@ tsconfig.tsbuildinfo
 # written into kb/ (including imports/) stays local-only. Your real KB
 # lives at $KB_ROOT outside the repo.
 kb/
+
+# Semantic index sidecar — generated artifact, never commit.
+# The .kb-index/ directory lives inside the KB root (wherever KB_ROOT points).
+# If you track your KB in git, add a similar rule in that repo's .gitignore.
+**/.kb-index/

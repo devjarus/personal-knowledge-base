@@ -71,7 +71,9 @@ Read `ARCHITECTURE.md` for the full picture. The important rules:
 3. **Server/client boundary.** Next.js server components and API routes may
    import from `@/core/*`. Files marked `'use client'` **must not** — they go
    through `/api/*` routes instead. Importing `fs` or the AWS SDK into a
-   client component is a build or runtime error.
+   client component is a build or runtime error. `@huggingface/transformers`
+   lives in `src/core/embeddings.ts` (server-only); client components must
+   never import it — the build would fail and the client bundle would bloat.
 4. **Next.js 15 async params.** Both catch-all pages and route handlers use
    `params: Promise<{ slug: string[] }>`. Always `await params` before use.
 5. **No new dependencies** unless the user explicitly approves. Everything
@@ -79,7 +81,30 @@ Read `ARCHITECTURE.md` for the full picture. The important rules:
    a color library. *(v1.1 note: the shadcn/ui redesign added an approved
    batch — shadcn primitives, next-themes, @tailwindcss/typography,
    lucide-react, cmdk, sonner, the Radix deps they pull in, and
-   tw-animate-css. Further additions still need explicit approval.)*
+   tw-animate-css. v1.2 note: `@huggingface/transformers` was added for
+   semantic search — explicitly approved. Further additions still need explicit
+   approval.)*
+
+### Generated artifact: `.kb-index/`
+
+`<KB_ROOT>/.kb-index/embeddings.jsonl` is the semantic embedding sidecar. It
+is a generated, derived-data directory — never commit it, never edit it
+manually.
+
+- Excluded from `listNotes()` walks (`IGNORED` set in `fs.ts`).
+- Listed in `.gitignore` at the repo level (`**/.kb-index/`). If you track
+  your user KB in its own git repo, add `**/.kb-index/` to that repo's
+  `.gitignore` as well.
+- Shipped by `rsync` / `kb sync` for free — no extra configuration needed.
+  On a new device, the sidecar is already present after sync; `kb search` will
+  use it immediately.
+- Regeneratable at any time: `kb reindex --force` rebuilds from scratch;
+  `kb reindex` (no flag) does an incremental refresh (re-embeds only changed
+  notes).
+- First use triggers a ~23MB model download to `$XDG_CACHE_HOME/huggingface/`
+  (NOT inside the KB root). Subsequent cold starts load the model in <2s.
+  A "loading model" log line is emitted to stderr on first use; it is silent
+  on subsequent warm calls.
 
 ## Codebase conventions
 

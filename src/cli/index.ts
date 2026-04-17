@@ -134,7 +134,11 @@ program
   .description("Print a note's raw contents (optionally a line range)")
   .argument("<path>", "KB-relative path, optionally with :N suffix for a single line")
   .option("--lines <range>", "line range to print, e.g. 5-10 or 42 (1-indexed, inclusive)")
-  .action(async (notePath: string, opts: { lines?: string }) => {
+  .option(
+    "--json",
+    "emit JSON {path, frontmatter, body, raw, size, mtime} instead of raw text",
+  )
+  .action(async (notePath: string, opts: { lines?: string; json?: boolean }) => {
     // Resolve line anchoring.
     // Form 1: path.md:42 — split off numeric suffix after the last colon.
     let resolvedPath = notePath;
@@ -179,6 +183,20 @@ program
 
     try {
       const note = await readNote(resolvedPath);
+      if (opts.json) {
+        // Agent-friendly structured output. Includes full Note shape; callers
+        // who only want body/frontmatter can pluck fields. --lines is honored
+        // by slicing raw+body to the requested range before serializing.
+        if (lineStart !== undefined) {
+          const allLines = note.raw.split("\n");
+          const start = lineStart - 1;
+          const end = Math.min((lineEnd ?? lineStart) - 1, allLines.length - 1);
+          note.raw = allLines.slice(start, end + 1).join("\n");
+          note.body = note.raw; // best-effort: frontmatter block may be sliced off
+        }
+        process.stdout.write(JSON.stringify(note, null, 2) + "\n");
+        return;
+      }
       if (lineStart === undefined) {
         // Full file output (unchanged behaviour)
         process.stdout.write(note.raw);
@@ -207,23 +225,68 @@ program
 
 program
   .command("new")
-  .description("Create a new note")
+  .description(
+    "Create a new note. With --upsert, overwrites if the path exists (idempotent).",
+  )
   .argument("<path>", "KB-relative path")
   .option("--title <title>", "frontmatter title")
-  .option("--tags <tags>", "comma-separated tags")
+  // --tags accepts a comma list; --tag is repeatable. Agents tend to guess
+  // `--tag a --tag b` first — support both so the first try succeeds.
+  .option("--tags <tags>", "comma-separated tags (e.g. --tags a,b,c)")
+  .option(
+    "--tag <tag>",
+    "add a tag (repeatable: --tag a --tag b)",
+    (value: string, prev: string[] = []) => [...prev, value],
+  )
   .option("--body <body>", "inline body (skips $EDITOR)")
+  .option(
+    "--upsert",
+    "overwrite if the note already exists instead of erroring (idempotent re-runs)",
+  )
   .action(
     async (
       notePath: string,
-      opts: { title?: string; tags?: string; body?: string },
+      opts: {
+        title?: string;
+        tags?: string;
+        tag?: string[];
+        body?: string;
+        upsert?: boolean;
+      },
     ) => {
       const fm: Record<string, unknown> = {};
       if (opts.title) fm.title = opts.title;
-      if (opts.tags)
-        fm.tags = opts.tags
-          .split(",")
-          .map((t) => t.trim())
-          .filter(Boolean);
+
+      // Merge --tags (comma list) and --tag (repeatable); dedupe.
+      const tagSet = new Set<string>();
+      if (opts.tags) {
+        for (const t of opts.tags.split(",").map((s) => s.trim()).filter(Boolean)) {
+          tagSet.add(t);
+        }
+      }
+      if (opts.tag) {
+        for (const t of opts.tag.map((s) => s.trim()).filter(Boolean)) {
+          tagSet.add(t);
+        }
+      }
+      if (tagSet.size > 0) fm.tags = Array.from(tagSet);
+
+      // Guard against silent overwrite BEFORE opening the editor so we don't
+      // waste an $EDITOR session when the check will fail anyway. writeNote()
+      // in core/fs.ts is upsert by design; `kb new` stays a strict "create"
+      // verb unless --upsert is passed.
+      let exists = false;
+      try {
+        await readNote(notePath);
+        exists = true;
+      } catch {
+        // readNote rejected because the path doesn't exist — safe to create.
+      }
+      if (exists && !opts.upsert) {
+        fail(
+          `note already exists: ${notePath} (pass --upsert to overwrite, or use a different path)`,
+        );
+      }
 
       let body = opts.body ?? "";
       if (!opts.body && stdin.isTTY) {
@@ -243,7 +306,8 @@ program
 
       try {
         const note = await writeNote({ path: notePath, body, frontmatter: fm });
-        process.stdout.write(`${color("created:", c.green)} ${note.path}\n`);
+        const verb = opts.upsert ? "upserted:" : "created:";
+        process.stdout.write(`${color(verb, c.green)} ${note.path}\n`);
       } catch (e) {
         fail(e instanceof Error ? e.message : String(e));
       }
@@ -321,8 +385,13 @@ function printTree(node: TreeNode, prefix = "", isLast = true, isRoot = true) {
 program
   .command("tree")
   .description("Print the KB directory tree")
-  .action(async () => {
+  .option("--json", "emit JSON TreeNode instead of the ASCII tree")
+  .action(async (opts: { json?: boolean }) => {
     const t = await buildTree();
+    if (opts.json) {
+      process.stdout.write(JSON.stringify(t, null, 2) + "\n");
+      return;
+    }
     printTree(t);
   });
 
@@ -646,43 +715,59 @@ function globToRegex(glob: string): RegExp {
 
 program
   .command("find")
-  .description("Search notes by filename / path (substring or glob)")
+  .description(
+    "Search notes by filename / path. Auto-detects glob if the pattern " +
+      "contains *, ?, or [...]; otherwise treats it as a case-insensitive substring. " +
+      "Use --substring or --glob to force a mode.",
+  )
   .argument("<pattern>", "pattern to match against KB-relative paths")
-  .option("--glob", "treat pattern as a glob (supports *, **, ?)")
+  .option("--glob", "force glob mode (supports *, **, ?, [abc])")
+  .option("--substring", "force substring mode (disables auto-detection)")
   .option("--json", "emit JSON array of note summaries")
-  .action(async (pattern: string, opts: { glob?: boolean; json?: boolean }) => {
-    let notes;
-    try {
-      notes = await listNotes(); // already sorted mtime desc
-    } catch (e) {
-      fail(e instanceof Error ? e.message : String(e));
-    }
+  .action(
+    async (
+      pattern: string,
+      opts: { glob?: boolean; substring?: boolean; json?: boolean },
+    ) => {
+      let notes;
+      try {
+        notes = await listNotes(); // already sorted mtime desc
+      } catch (e) {
+        fail(e instanceof Error ? e.message : String(e));
+      }
 
-    let hits;
-    if (opts.glob) {
-      const re = globToRegex(pattern);
-      hits = notes.filter((n) => re.test(n.path));
-    } else {
-      const lower = pattern.toLowerCase();
-      hits = notes.filter((n) => n.path.toLowerCase().includes(lower));
-    }
+      // Auto-detect: a pattern containing any glob metachar becomes glob mode
+      // unless the user forced --substring. Fixes the "user tries *summary*
+      // expecting a match, gets zero hits" footgun called out by agents.
+      const hasGlobMeta = /[*?[]/.test(pattern);
+      const useGlob = opts.glob || (hasGlobMeta && !opts.substring);
 
-    if (opts.json) {
-      process.stdout.write(JSON.stringify(hits, null, 2) + "\n");
-      return;
-    }
+      let hits;
+      if (useGlob) {
+        const re = globToRegex(pattern);
+        hits = notes.filter((n) => re.test(n.path));
+      } else {
+        const lower = pattern.toLowerCase();
+        hits = notes.filter((n) => n.path.toLowerCase().includes(lower));
+      }
 
-    if (hits.length === 0) {
-      process.stdout.write(color("(no matches)\n", c.dim));
-      return;
-    }
+      if (opts.json) {
+        process.stdout.write(JSON.stringify(hits, null, 2) + "\n");
+        return;
+      }
 
-    for (const h of hits) {
-      process.stdout.write(
-        `${color(h.path, c.blue)}  ${color(h.title, c.bold)}\n`,
-      );
-    }
-  });
+      if (hits.length === 0) {
+        process.stdout.write(color("(no matches)\n", c.dim));
+        return;
+      }
+
+      for (const h of hits) {
+        process.stdout.write(
+          `${color(h.path, c.blue)}  ${color(h.title, c.bold)}\n`,
+        );
+      }
+    },
+  );
 
 // ---------------------------------------------------------------------------
 // Seed file names that are excluded from orphan output by default.

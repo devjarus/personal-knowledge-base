@@ -2,6 +2,38 @@
 /**
  * `kb` CLI — thin commander wrapper around the core library.
  */
+
+// Load .env.local from the project root BEFORE any module that reads env vars
+// (kbRoot() in ./paths reads process.env.KB_ROOT at call time). Next.js
+// auto-loads .env.local; tsx does not — this closes the gap so `pnpm kb ...`
+// and the UI use the same KB_ROOT without requiring manual `export`.
+// Minimal inline parser: KEY=VALUE lines, # comments, optional surrounding
+// quotes. Existing env vars win (override=false), so CLI caller can still
+// override with `KB_ROOT=/other pnpm kb ...`.
+import { fileURLToPath as _fileURLToPath } from "node:url";
+import path_ from "node:path";
+import { readFileSync as _readFileSync, existsSync as _existsSync } from "node:fs";
+{
+  const __cliDir = path_.dirname(_fileURLToPath(import.meta.url));
+  const envPath = path_.join(__cliDir, "..", "..", ".env.local");
+  if (_existsSync(envPath)) {
+    for (const line of _readFileSync(envPath, "utf8").split("\n")) {
+      const m = line.match(/^\s*([A-Z_][A-Z0-9_]*)\s*=\s*(.*?)\s*$/i);
+      if (!m || line.trim().startsWith("#")) continue;
+      const key = m[1];
+      if (process.env[key] !== undefined) continue; // caller override wins
+      let val = m[2];
+      if (
+        (val.startsWith('"') && val.endsWith('"')) ||
+        (val.startsWith("'") && val.endsWith("'"))
+      ) {
+        val = val.slice(1, -1);
+      }
+      process.env[key] = val;
+    }
+  }
+}
+
 import { Command } from "commander";
 import { spawn, spawnSync } from "node:child_process";
 import { createInterface } from "node:readline/promises";

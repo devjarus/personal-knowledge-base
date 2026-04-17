@@ -2,7 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { FolderInput, FolderTree, Settings, Wand2 } from "lucide-react";
+import {
+  Activity,
+  FolderInput,
+  FolderTree,
+  Lightbulb,
+  Settings,
+  Wand2,
+} from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -70,6 +77,30 @@ export function AppSidebar() {
                   <Link href="/organize" className="gap-2">
                     <Wand2 className="h-4 w-4 shrink-0 text-muted-foreground" />
                     <span>Organize</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  tooltip="View cluster summaries"
+                  isActive={pathname === "/learnings"}
+                >
+                  <Link href="/learnings" className="gap-2">
+                    <Lightbulb className="h-4 w-4 shrink-0 text-muted-foreground" />
+                    <span>Learnings</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  tooltip="KB health: orphans, broken links"
+                  isActive={pathname === "/stats"}
+                >
+                  <Link href="/stats" className="gap-2">
+                    <Activity className="h-4 w-4 shrink-0 text-muted-foreground" />
+                    <span>Health</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>

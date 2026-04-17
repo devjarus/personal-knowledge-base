@@ -101,6 +101,36 @@ files survive every delete; only the visible KB tree changes.
 - `deleteFolder` refuses to operate on `.trash` itself — no deleting the bin
   via the API. Same for `.kb-index`.
 
+### Auto-organize: `kb organize`
+
+Clusters notes into topical folders using a tag-first + embedding-cluster
+fallback scheme. Local model (Xenova/flan-t5-small) names clusters; falls
+back to TF-IDF if model unavailable. **No API key needed.**
+
+- `kb organize` — dry-run, prints plan (no disk writes)
+- `kb organize --apply` — execute moves + link rewrites (transactional)
+- `kb organize --undo` — reverse the most recent applied organize
+- `kb organize --json` — machine-readable plan
+- `kb organize --no-llm` — force TF-IDF naming (skip model download)
+- `kb organize --exclude <glob>` — extend default carve-outs (repeatable)
+- `kb organize --min-confidence <n>` — override cluster threshold (default 0.35)
+- `kb organize --max-clusters <n>` — cap cluster count (default auto, max 20)
+- `kb organize --no-rewrite-links` — skip link rewriting pass
+- `kb organize --keep-empty-dirs` — don't sweep empty parents after moves
+
+Baked-in carve-outs (never moved): dotfiles, `.trash/`, `.kb-index/`,
+`meta/`, `daily/`, notes with `organize: false` or `pinned: true` in
+frontmatter.
+
+Move ledger lives at `.kb-index/organize/<timestamp>.jsonl` — append-only,
+crash-safe, enables `--undo`. Ledger records: `{kind:"move", from, to,
+contentHash}` + `{kind:"link-rewrite", file, before, after, byteOffset}`.
+
+Implementation lives in `src/core/organize.ts` + `src/core/organize/`
+(cluster, classifier, carveouts, move, ledger, rewriteLinks, llmNaming,
+folderName). CLI in `src/cli/index.ts` (`organize` subcommand). No UI
+surface yet.
+
 ### Generated artifact: `.kb-index/`
 
 `<KB_ROOT>/.kb-index/embeddings.jsonl` is the semantic embedding sidecar. It
@@ -254,7 +284,9 @@ bin/                       # tiny Node loaders for global install (no deps)
 .mcp.json                  # project-scoped MCP config, auto-loaded by Claude Code
 CLAUDE.md                  # redirect to AGENTS.md (Claude Code looks for this name)
 .nvmrc                     # Node version pin (24)
-src/core/                  # filesystem + search + sync + types (pure Node)
+src/core/                  # filesystem + search + sync + organize + types (pure Node)
+  organize.ts              # auto-organize: buildOrganizePlan, apply, undo
+  organize/                # submodules: cluster, classifier, carveouts, move, ledger, rewriteLinks, llmNaming, folderName
 src/app/                   # Next.js App Router
   layout.tsx               # root: ThemeProvider + Toaster, no shell
   globals.css              # Tailwind v4 + shadcn slate OKLCH vars + @plugin typography
@@ -279,7 +311,7 @@ src/components/            # feature components (not shadcn primitives)
 src/lib/utils.ts           # cn() helper
 src/hooks/                 # shadcn hooks (e.g. useMobile)
 src/mcp/server.ts          # MCP stdio server, seven tools
-src/cli/index.ts           # commander CLI, eight subcommands
+src/cli/index.ts           # commander CLI, nine subcommands (incl. organize)
 components.json            # shadcn config
 kb/                        # user notes (or wherever KB_ROOT points)
 .coding-agent/             # orchestrator pipeline workspace (spec, plan, review, learnings)

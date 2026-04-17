@@ -1031,6 +1031,7 @@ program
   .option("--min-confidence <n>", "cluster-confidence threshold (default 0.35)")
   .option("--max-clusters <n>", "upper bound on cluster count (default auto)")
   .option("--keep-empty-dirs", "don't sweep empty parent dirs after moves")
+  .option("--no-llm", "use TF-IDF naming instead of local model naming")
   .action(
     async (opts: {
       apply?: boolean;
@@ -1042,8 +1043,10 @@ program
       minConfidence?: string;
       maxClusters?: string;
       keepEmptyDirs?: boolean;
+      llm?: boolean; // commander sets false when --no-llm is used
     }) => {
       const jsonMode = opts.json === true;
+      const noLlm = opts.llm === false; // commander: --no-llm sets opts.llm = false
       const minConf =
         opts.minConfidence !== undefined ? Number(opts.minConfidence) : undefined;
       const maxClusters =
@@ -1103,6 +1106,7 @@ program
           maxClusters,
           // commander sets opts.rewriteLinks = false when --no-rewrite-links is passed
           rewriteLinks: opts.rewriteLinks !== false,
+          noLlm,
         });
       } catch (e) {
         // Map OrganizeError codes to user-friendly messages (spec §6).

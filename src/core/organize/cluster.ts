@@ -13,6 +13,17 @@
  *   be merging increasingly dissimilar clusters). We stop just before that jump.
  *   Result is capped at `maxClusters`.
  *
+ *   For large corpora (N > 50), a minimum cluster floor is enforced:
+ *   at least Math.max(8, Math.ceil(N / 25)) clusters. The elbow method only
+ *   decides whether to split BEYOND the minimum — it runs within the range
+ *   [minClusters, maxClusters].
+ *
+ * Corpus-wide stop word filtering:
+ *   Before TF-IDF scoring, terms that appear in >60% of all notes (across
+ *   ALL cluster inputs) are added to the stop-word set. This prevents
+ *   domain-saturated terms (e.g. "agent", "skill") from dominating every
+ *   cluster's label.
+ *
  * Tokenization for top-term extraction:
  *   Input: title tokens + tag tokens per note.
  *   Steps: lowercase → remove non-alphanumeric → filter stop-words + short
@@ -60,6 +71,15 @@ export interface ClusterOutput {
 }
 
 // ---------------------------------------------------------------------------
+// Corpus-wide stop-word threshold: terms appearing in more than this fraction
+// of ALL input notes are treated as corpus-specific noise and excluded from
+// TF-IDF scoring. This prevents domain-saturating terms (e.g. "agent") from
+// appearing as top terms in every cluster.
+// ---------------------------------------------------------------------------
+
+const CORPUS_STOP_WORD_THRESHOLD = 0.6;
+
+// ---------------------------------------------------------------------------
 // Stop-word list for TF-IDF term extraction.
 // Keep it small and local — no new deps.
 // ---------------------------------------------------------------------------
@@ -105,13 +125,45 @@ function computeCentroid(vecs: Float32Array[]): Float32Array {
 
 // ---------------------------------------------------------------------------
 // Tokenize a string into cleaned lowercase tokens.
+// Accepts an optional extra stop-word set (e.g. corpus-wide dynamic stops).
 // ---------------------------------------------------------------------------
 
-function tokenize(text: string): string[] {
+function tokenize(text: string, extraStops?: Set<string>): string[] {
   return text
     .toLowerCase()
     .split(/[^a-z0-9]+/)
-    .filter((t) => t.length >= 3 && !STOP_WORDS.has(t));
+    .filter((t) => t.length >= 3 && !STOP_WORDS.has(t) && !(extraStops?.has(t)));
+}
+
+// ---------------------------------------------------------------------------
+// Compute corpus-wide stop words: terms that appear in >CORPUS_STOP_WORD_THRESHOLD
+// fraction of all notes (across all cluster inputs, pre-clustering). These terms
+// are domain-saturated and provide no discriminating signal for cluster naming.
+// ---------------------------------------------------------------------------
+
+function computeCorpusStopWords(allInputs: ClusterInput[]): Set<string> {
+  if (allInputs.length === 0) return new Set();
+
+  const docFreq = new Map<string, number>(); // term → # notes containing it
+  for (const inp of allInputs) {
+    // Use base STOP_WORDS only here (we're building the extended set, not using it yet).
+    const allTerms = new Set<string>([
+      ...inp.titleTerms.flatMap((t) => tokenize(t)),
+      ...inp.tagTerms.flatMap((t) => tokenize(t)),
+    ]);
+    for (const t of allTerms) {
+      docFreq.set(t, (docFreq.get(t) ?? 0) + 1);
+    }
+  }
+
+  const threshold = CORPUS_STOP_WORD_THRESHOLD * allInputs.length;
+  const corpusStops = new Set<string>();
+  for (const [term, freq] of docFreq.entries()) {
+    if (freq > threshold) {
+      corpusStops.add(term);
+    }
+  }
+  return corpusStops;
 }
 
 // ---------------------------------------------------------------------------
@@ -121,7 +173,8 @@ function tokenize(text: string): string[] {
 function extractTopTerms(
   clusterInputs: ClusterInput[],
   allClusterInputs: ClusterInput[][],
-  topN: number
+  topN: number,
+  corpusStopWords?: Set<string>
 ): string[] {
   const totalClusters = Math.max(allClusterInputs.length, 1);
 
@@ -129,8 +182,8 @@ function extractTopTerms(
   const tf = new Map<string, number>();
   for (const inp of clusterInputs) {
     const allTerms = [
-      ...inp.titleTerms.flatMap(tokenize),
-      ...inp.tagTerms.flatMap(tokenize),
+      ...inp.titleTerms.flatMap((t) => tokenize(t, corpusStopWords)),
+      ...inp.tagTerms.flatMap((t) => tokenize(t, corpusStopWords)),
     ];
     for (const t of allTerms) {
       tf.set(t, (tf.get(t) ?? 0) + 1);
@@ -145,8 +198,8 @@ function extractTopTerms(
     const clusterTerms = new Set<string>();
     for (const inp of cInputs) {
       const allTerms = [
-        ...inp.titleTerms.flatMap(tokenize),
-        ...inp.tagTerms.flatMap(tokenize),
+        ...inp.titleTerms.flatMap((t) => tokenize(t, corpusStopWords)),
+        ...inp.tagTerms.flatMap((t) => tokenize(t, corpusStopWords)),
       ];
       for (const t of allTerms) clusterTerms.add(t);
     }
@@ -205,29 +258,33 @@ function completeLinkageDistance(
 // to keep all merges.
 // ---------------------------------------------------------------------------
 
-function elbowMergeCount(mergeDistances: number[], maxClusters: number, n: number): number {
+function elbowMergeCount(
+  mergeDistances: number[],
+  maxClusters: number,
+  minClusters: number,
+  n: number
+): number {
   if (mergeDistances.length === 0) return 0;
 
-  // We want to end up with at most maxClusters clusters.
-  // After k merges, we have n - k clusters.
-  // So to have at most maxClusters, we need at least n - maxClusters merges.
+  // After k merges we have n - k clusters.
+  // To have AT MOST maxClusters: need at least n - maxClusters merges.
+  // To have AT LEAST minClusters: need at most n - minClusters merges.
   const minMerges = Math.max(0, n - maxClusters);
-  // Maximum merges: n - 2 (to keep at least 2 clusters for the single-member check).
-  // Actually we allow merging to 1 cluster too.
-  const maxMerges = mergeDistances.length;
+  const maxMergesForMinClusters = Math.max(0, n - minClusters);
+  const maxMerges = Math.min(mergeDistances.length, maxMergesForMinClusters);
 
   if (minMerges >= maxMerges) {
-    // Must do all merges to satisfy maxClusters constraint.
+    // The minClusters floor forces us to stop at exactly maxMergesForMinClusters merges.
     return maxMerges;
   }
 
-  // Find the biggest gap in merge distances AFTER the mandatory minMerges.
-  // We look at distances[minMerges..maxMerges-1] and find the biggest jump.
+  // Find the biggest gap in merge distances within [minMerges, maxMerges - 1].
+  // The elbow is the point where the NEXT merge would be significantly more expensive.
+  // We run within [minClusters, maxClusters] range only — not below minClusters.
   let bestGapIdx = minMerges; // default: do exactly minMerges merges
   let bestGap = -1;
 
   for (let i = minMerges; i < maxMerges - 1; i++) {
-    // Gap = distance[i+1] - distance[i] (how much more expensive the next merge is).
     const gap = mergeDistances[i + 1] - mergeDistances[i];
     if (gap > bestGap) {
       bestGap = gap;
@@ -236,10 +293,14 @@ function elbowMergeCount(mergeDistances: number[], maxClusters: number, n: numbe
   }
 
   // We stop BEFORE the big gap: perform merges 0..bestGapIdx (inclusive).
-  // If bestGap is effectively 0 (all distances equal), keep all merges.
+  // If bestGap is effectively 0 (all distances equal), fall back to the minClusters
+  // floor — enforce minimum granularity rather than collapsing to 1 cluster.
   const threshold = 0.01; // minimum meaningful gap
   if (bestGap < threshold) {
-    return maxMerges; // no clear elbow → merge everything (all notes similar)
+    // LOAD-BEARING: without this, a corpus of similar notes (all about "agents") would
+    // collapse to 1 cluster because no gap exceeds the threshold. We honor the
+    // minClusters floor to produce the requested granularity even on uniform corpora.
+    return maxMerges; // stop at minClusters (maxMergesForMinClusters)
   }
 
   return bestGapIdx + 1;
@@ -257,13 +318,19 @@ function elbowMergeCount(mergeDistances: number[], maxClusters: number, n: numbe
  * @param opts.minConfidence  Minimum cosine similarity to cluster centroid;
  *                            notes below this go to `unassigned`.
  * @param opts.maxClusters    Upper bound on cluster count (default 20).
+ * @param opts.minClusters    Lower bound on cluster count. For N > 50 notes,
+ *                            caller should pass Math.max(8, Math.ceil(N / 25)).
+ *                            Defaults to 1 (no floor).
  * @returns ClusterOutput with clusters, assignments, and unassigned list.
  */
 export function cluster(
   inputs: ClusterInput[],
-  opts: { minConfidence: number; maxClusters: number }
+  opts: { minConfidence: number; maxClusters: number; minClusters?: number }
 ): ClusterOutput {
   const { minConfidence, maxClusters } = opts;
+  // minClusters floor: defaults to 1 (no enforcement) if not provided.
+  // For large corpora, callers should pass Math.max(8, Math.ceil(n / 25)).
+  const minClusters = opts.minClusters ?? 1;
 
   // Edge case: empty or single note can't form a meaningful cluster.
   if (inputs.length === 0) {
@@ -280,6 +347,10 @@ export function cluster(
   // Defensive sort for determinism (caller should sort too, but belt-and-suspenders).
   const sorted = [...inputs].sort((a, b) => a.path.localeCompare(b.path));
   const n = sorted.length;
+
+  // Compute corpus-wide stop words before clustering (pre-clustering, across ALL inputs).
+  // These are terms that appear in >60% of notes — domain noise like "agent", "skill".
+  const corpusStopWords = computeCorpusStopWords(sorted);
 
   // ---------------------------------------------------------------------------
   // Phase 1: Run the FULL agglomerative merge (down to 1 cluster) and record
@@ -332,7 +403,7 @@ export function cluster(
   // After `cutMerges` merges, we have `n - cutMerges` clusters.
   // ---------------------------------------------------------------------------
 
-  const cutMerges = elbowMergeCount(mergeDistances, maxClusters, n);
+  const cutMerges = elbowMergeCount(mergeDistances, maxClusters, minClusters, n);
 
   // ---------------------------------------------------------------------------
   // Phase 3: Re-run merging to get the final cluster assignment at the cut point.
@@ -423,7 +494,8 @@ export function cluster(
     const topTerms = extractTopTerms(
       clusterInputGroups[ci],
       clusterInputGroups,
-      3
+      3,
+      corpusStopWords
     );
     const folder = deriveFolderName(
       topTerms.length > 0 ? topTerms : ["cluster"],

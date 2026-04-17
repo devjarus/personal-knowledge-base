@@ -18,7 +18,7 @@
     "kb": "tsx src/cli/index.ts",
     "mcp": "tsx src/mcp/server.ts",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test src/core/__tests__/semanticIndex.test.ts src/core/__tests__/organize-carveouts.test.ts src/core/__tests__/organize-classifier.test.ts src/core/__tests__/organize-cluster.test.ts src/core/__tests__/organize.test.ts src/core/__tests__/organize-apply.test.ts src/core/__tests__/organize-undo.test.ts src/core/__tests__/organize-linkrewrite.test.ts src/cli/__tests__/organize.test.ts"
+    "test": "tsx --test src/core/__tests__/semanticIndex.test.ts src/core/__tests__/organize-carveouts.test.ts src/core/__tests__/organize-classifier.test.ts src/core/__tests__/organize-cluster.test.ts src/core/__tests__/organize-llmNaming.test.ts src/core/__tests__/organize.test.ts src/core/__tests__/organize-apply.test.ts src/core/__tests__/organize-undo.test.ts src/core/__tests__/organize-linkrewrite.test.ts src/cli/__tests__/organize.test.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.687.0",

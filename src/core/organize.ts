@@ -19,6 +19,9 @@ import { isCarvedOut } from "./organize/carveouts.js";
 import { classifyByFrontmatter } from "./organize/classifier.js";
 import { cluster } from "./organize/cluster.js";
 import type { ClusterInput } from "./organize/cluster.js";
+import { nameClusters } from "./organize/llmNaming.js";
+import type { ClusterForNaming } from "./organize/llmNaming.js";
+import { deriveFolderName } from "./organize/folderName.js";
 import type { NoteSummary } from "./types.js";
 import { readNote } from "./fs.js";
 import { moveNote } from "./organize/move.js";
@@ -77,8 +80,10 @@ export interface BuildPlanOptions {
   exclude?: string[];             // extra globs beyond the baked-in carve-outs
   minConfidence?: number;         // default 0.35
   maxClusters?: number;           // default auto, capped at 20
+  minClusters?: number;           // default: Math.max(8, ceil(N/25)) for N>50
   driftMargin?: number;           // default 0.05 (incremental only)
   rewriteLinks?: boolean;         // default true (Phase 3 implements this)
+  noLlm?: boolean;                // if true, skip LLM naming and use TF-IDF
 }
 
 export interface ApplyResult {
@@ -170,6 +175,7 @@ export async function buildOrganizePlan(opts: BuildPlanOptions): Promise<Organiz
   const minConfidence = opts.minConfidence ?? 0.35;
   const maxClusters = opts.maxClusters ?? 20;
   const extraGlobs = opts.exclude ?? [];
+  const noLlm = opts.noLlm ?? false;
 
   // ---------------------------------------------------------------------------
   // Validate .kb-index existence. Fail fast with a useful error message.
@@ -358,21 +364,80 @@ export async function buildOrganizePlan(opts: BuildPlanOptions): Promise<Organiz
     // Sort for determinism.
     clusterInputs.sort((a, b) => a.path.localeCompare(b.path));
 
-    const clusterOut = cluster(clusterInputs, { minConfidence, maxClusters });
+    // Compute minClusters floor: for N > 50 notes, enforce at least Math.max(8, ceil(N/25)).
+    // This prevents the elbow method from collapsing a large, similar corpus into 4 clusters.
+    // The caller can override via opts.minClusters.
+    const n = clusterInputs.length;
+    const computedMinClusters =
+      opts.minClusters !== undefined
+        ? opts.minClusters
+        : n > 50
+        ? Math.max(8, Math.ceil(n / 25))
+        : 1;
 
-    // Register cluster folder assignments.
-    for (const c of clusterOut.clusters) {
+    const clusterOut = cluster(clusterInputs, {
+      minConfidence,
+      maxClusters,
+      minClusters: computedMinClusters,
+    });
+
+    // --- LLM-assisted (or TF-IDF fallback) folder naming ---
+    // Build ClusterForNaming descriptors from the raw cluster results.
+    // This runs BEFORE building OrganizeMoves so each cluster gets its LLM name.
+    const clustersForNaming: ClusterForNaming[] = clusterOut.clusters.map((cr) => {
+      // Collect titles and tags from member notes.
+      const memberTitles: string[] = [];
+      const memberTagsSet = new Set<string>();
+      for (const memberPath of cr.memberPaths) {
+        const meta = clusterInputMeta.get(memberPath);
+        if (meta) {
+          memberTitles.push(meta.note.title);
+          for (const tag of meta.note.tags) memberTagsSet.add(tag);
+        }
+      }
+      return {
+        memberTitles,
+        memberTags: [...memberTagsSet],
+        topTermsTfIdf: cr.topTerms,
+        memberCount: cr.memberPaths.length,
+      };
+    });
+
+    // Name all clusters — local model if available, TF-IDF otherwise.
+    // noLlm: true forces TF-IDF naming (skips the local generation model).
+    let folderNames: string[];
+    if (noLlm) {
+      // Force TF-IDF path: use deriveFolderName directly (no model load).
+      const used = new Set<string>(existingFolders);
+      folderNames = clustersForNaming.map((c) => {
+        const name = deriveFolderName(
+          c.topTermsTfIdf.length > 0 ? c.topTermsTfIdf : ["cluster"],
+          used,
+        );
+        used.add(name);
+        return name;
+      });
+    } else {
+      folderNames = await nameClusters(clustersForNaming, existingFolders);
+    }
+
+    // Register cluster folder assignments using the (possibly LLM) names.
+    for (let ci = 0; ci < clusterOut.clusters.length; ci++) {
+      const cr = clusterOut.clusters[ci];
+      // Use LLM/TF-IDF name; fall back to the TF-IDF name on the cluster itself as safety.
+      const folder = folderNames[ci] ?? cr.folder;
+
       clusterSummaries.push({
-        folder: c.folder,
-        memberCount: c.memberPaths.length,
-        topTerms: c.topTerms,
+        folder,
+        memberCount: cr.memberPaths.length,
+        topTerms: cr.topTerms,
       });
 
-      for (const memberPath of c.memberPaths) {
+      for (const memberPath of cr.memberPaths) {
         const assignment = clusterOut.assignments.get(memberPath);
         if (!assignment) continue;
 
-        const tPath = targetPath(memberPath, c.folder);
+        const tPath = targetPath(memberPath, folder);
 
         // No-op check.
         if (tPath === memberPath) continue;
@@ -392,7 +457,7 @@ export async function buildOrganizePlan(opts: BuildPlanOptions): Promise<Organiz
           to: tPath,
           reason: "cluster",
           confidence: assignment.confidence,
-          clusterLabel: c.folder,
+          clusterLabel: folder,
         });
         byCluster++;
       }

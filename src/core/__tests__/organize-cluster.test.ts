@@ -158,25 +158,45 @@ describe("cluster — minConfidence", () => {
 // ---------------------------------------------------------------------------
 
 describe("cluster — top-term extraction via deriveFolderName", () => {
-  test("cluster of RAG+eval notes produces a non-empty slug-safe folder name", async () => {
+  test("cluster of notes with DISTINCT terms produces a non-empty slug-safe folder name", async () => {
     const cluster = await getCluster();
     const deriveFolderName = await getDeriveFolderName();
 
-    const inputs: ClusterInput[] = Array.from({ length: 5 }, (_, i) => ({
+    // Two distinct clusters so TF-IDF has something to discriminate between.
+    // Cluster A: RAG / retrieval notes; Cluster B: billing / invoice notes.
+    // This ensures term discrimination works and no term hits the 60% corpus-stop threshold.
+    const inputsA: ClusterInput[] = Array.from({ length: 5 }, (_, i) => ({
       path: `rag/note${i}.md`,
       embedding: makeVec(1, 8),
-      titleTerms: ["RAG", "eval", "retrieval"],
-      tagTerms: ["rag", "eval"],
+      titleTerms: ["retrieval", "augmented", "generation"],
+      tagTerms: ["rag"],
     }));
-    inputs.sort((a, b) => a.path.localeCompare(b.path));
+    const inputsB: ClusterInput[] = Array.from({ length: 5 }, (_, i) => ({
+      path: `billing/note${i}.md`,
+      embedding: makeVec(50, 8),
+      titleTerms: ["billing", "invoice", "payment"],
+      tagTerms: ["billing"],
+    }));
+    const inputs = [...inputsA, ...inputsB].sort((a, b) =>
+      a.path.localeCompare(b.path)
+    );
 
     const out = cluster(inputs, { minConfidence: 0.0, maxClusters: 10 });
     assert.ok(out.clusters.length > 0, "Should have at least one cluster");
 
     const c = out.clusters[0];
-    assert.ok(c.topTerms.length > 0, "topTerms must be non-empty");
+    // topTerms may be empty only if ALL terms became corpus stop words.
+    // With two distinct clusters each with distinct terms, at least one cluster
+    // should have discriminating terms.
+    const allTopTerms = out.clusters.flatMap((cl) => cl.topTerms);
+    assert.ok(
+      allTopTerms.length > 0,
+      "At least some clusters must have non-empty topTerms when notes have distinct terms"
+    );
 
-    const folder = deriveFolderName(c.topTerms, new Set());
+    // deriveFolderName should produce a slug-safe name regardless.
+    const topTermsOrFallback = c.topTerms.length > 0 ? c.topTerms : ["cluster"];
+    const folder = deriveFolderName(topTermsOrFallback, new Set());
     assert.ok(folder.length > 0, "Derived folder name must be non-empty");
     // Slug-safe: only lowercase alphanumeric + hyphens.
     assert.match(folder, /^[a-z0-9][a-z0-9-]*$/, `Folder name '${folder}' is not slug-safe`);
@@ -253,5 +273,141 @@ describe("deriveFolderName — collision avoidance", () => {
     assert.notEqual(name, "agents", "Should not return existing folder name");
     // Must still be slug-safe.
     assert.match(name, /^[a-z0-9][a-z0-9-]*$/, `Name '${name}' not slug-safe`);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Test 9: minClusters floor — N > 50 notes produce at least 8 clusters
+// ---------------------------------------------------------------------------
+
+describe("cluster — minClusters floor", () => {
+  test("60 notes with minClusters=8 produce at least 8 clusters", async () => {
+    const cluster = await getCluster();
+    // 6 natural clusters, 10 notes each = 60 notes total.
+    // All cluster inputs share a common "agent" title term to simulate a uniform corpus.
+    const inputs = makeFixture(6, 10);
+    const out = cluster(inputs, {
+      minConfidence: 0.0,
+      maxClusters: 20,
+      minClusters: 8,
+    });
+    assert.ok(
+      out.clusters.length >= 8,
+      `Expected >= 8 clusters with minClusters=8, got ${out.clusters.length}`
+    );
+    assert.ok(
+      out.clusters.length <= 20,
+      `Expected <= 20 clusters (maxClusters cap), got ${out.clusters.length}`
+    );
+  });
+
+  test("auto-computed floor: 55 inputs → minClusters=Math.max(8, ceil(55/25))=8", async () => {
+    const cluster = await getCluster();
+    // 11 clusters × 5 notes = 55 notes.
+    const inputs = makeFixture(11, 5);
+    // Compute the same floor the organizer computes.
+    const n = inputs.length; // 55
+    const minClusters = n > 50 ? Math.max(8, Math.ceil(n / 25)) : 1; // = 8
+    const out = cluster(inputs, {
+      minConfidence: 0.0,
+      maxClusters: 20,
+      minClusters,
+    });
+    assert.ok(
+      out.clusters.length >= minClusters,
+      `Expected >= ${minClusters} clusters, got ${out.clusters.length}`
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Test 10: Corpus-wide stop words — dominant term not in top terms
+// ---------------------------------------------------------------------------
+
+describe("cluster — corpus-wide stop words", () => {
+  test("term appearing in >60% of notes is excluded from cluster top terms", async () => {
+    const cluster = await getCluster();
+    // Build inputs where 80% of notes all share the term "agent" in their title.
+    // The remaining 20% use "billing" — neither group should have "agent" as top term
+    // after corpus-stop filtering, because "agent" appears in too many docs.
+    const inputs: ClusterInput[] = [];
+    const dim = 16;
+
+    // Group A: agent notes (80 of 100) — two different embedding clusters
+    const baseA = makeVec(1, dim);
+    for (let i = 0; i < 40; i++) {
+      const v = new Float32Array(dim);
+      let acc = 0;
+      for (let j = 0; j < dim; j++) {
+        v[j] = baseA[j] + 0.0005 * Math.sin(i * j * 0.1);
+        acc += v[j] * v[j];
+      }
+      const norm = Math.sqrt(acc);
+      for (let j = 0; j < dim; j++) v[j] /= norm;
+      inputs.push({
+        path: `agentA/note${i}.md`,
+        embedding: v,
+        titleTerms: ["agent", "memory"],
+        tagTerms: ["agent"],
+      });
+    }
+
+    const baseB = makeVec(2, dim);
+    for (let i = 0; i < 40; i++) {
+      const v = new Float32Array(dim);
+      let acc = 0;
+      for (let j = 0; j < dim; j++) {
+        v[j] = baseB[j] + 0.0005 * Math.sin(i * j * 0.1);
+        acc += v[j] * v[j];
+      }
+      const norm = Math.sqrt(acc);
+      for (let j = 0; j < dim; j++) v[j] /= norm;
+      inputs.push({
+        path: `agentB/note${i}.md`,
+        embedding: v,
+        titleTerms: ["agent", "planning"],
+        tagTerms: ["agent"],
+      });
+    }
+
+    // Group B: billing notes (20 of 100)
+    const baseC = makeVec(3, dim);
+    for (let i = 0; i < 20; i++) {
+      const v = new Float32Array(dim);
+      let acc = 0;
+      for (let j = 0; j < dim; j++) {
+        v[j] = baseC[j] + 0.0005 * Math.sin(i * j * 0.1);
+        acc += v[j] * v[j];
+      }
+      const norm = Math.sqrt(acc);
+      for (let j = 0; j < dim; j++) v[j] /= norm;
+      inputs.push({
+        path: `billing/note${i}.md`,
+        embedding: v,
+        titleTerms: ["billing", "invoice"],
+        tagTerms: ["billing"],
+      });
+    }
+
+    inputs.sort((a, b) => a.path.localeCompare(b.path));
+
+    const out = cluster(inputs, {
+      minConfidence: 0.0,
+      maxClusters: 20,
+      minClusters: 3,
+    });
+
+    assert.ok(out.clusters.length > 0, "Should produce at least one cluster");
+
+    // "agent" appears in 80% of notes → should be a corpus stop word.
+    // It must NOT appear as a top term in ANY cluster.
+    for (const c of out.clusters) {
+      assert.ok(
+        !c.topTerms.includes("agent"),
+        `"agent" should not appear in topTerms of cluster "${c.folder}" ` +
+        `(appeared in 80% of notes, above 60% threshold). ` +
+        `Got topTerms: [${c.topTerms.join(", ")}]`
+      );
+    }
   });
 });

@@ -105,7 +105,7 @@ async function seedIndex(
 
 describe("buildOrganizePlan — missing .kb-index", () => {
   test("throws OrganizeError when .kb-index is missing", async () => {
-    const { buildOrganizePlan, OrganizeError } = await import("../organize.js");
+    const { buildOrganizePlan, OrganizeError } = await import("@/core/organize.js");
 
     // Use a fresh temp dir with NO .kb-index.
     const emptyDir = await fs.mkdtemp(path.join(os.tmpdir(), "kb-org-empty-"));
@@ -130,9 +130,9 @@ describe("buildOrganizePlan — missing .kb-index", () => {
 
 describe("buildOrganizePlan — tag-first priority ladder", () => {
   test("notes with type: go to type folder; notes with tags: go to tag folder", async () => {
-    const { buildOrganizePlan } = await import("../organize.js");
-    const { _invalidateNotesCache } = await import("../fs.js");
-    const { _invalidateSemanticCache } = await import("../semanticIndex.js");
+    const { buildOrganizePlan } = await import("@/core/organize.js");
+    const { _invalidateNotesCache } = await import("@/core/fs.js");
+    const { _invalidateSemanticCache } = await import("@/core/semanticIndex.js");
 
     _invalidateNotesCache();
     _invalidateSemanticCache();
@@ -169,9 +169,9 @@ describe("buildOrganizePlan — tag-first priority ladder", () => {
   });
 
   test("note with both type and tags: type wins", async () => {
-    const { buildOrganizePlan } = await import("../organize.js");
-    const { _invalidateNotesCache } = await import("../fs.js");
-    const { _invalidateSemanticCache } = await import("../semanticIndex.js");
+    const { buildOrganizePlan } = await import("@/core/organize.js");
+    const { _invalidateNotesCache } = await import("@/core/fs.js");
+    const { _invalidateSemanticCache } = await import("@/core/semanticIndex.js");
 
     _invalidateNotesCache();
     _invalidateSemanticCache();
@@ -200,9 +200,9 @@ describe("buildOrganizePlan — tag-first priority ladder", () => {
 
 describe("buildOrganizePlan — carve-out enforcement", () => {
   test("meta/, daily/, dotfiles, organize:false, pinned:true are excluded from moves", async () => {
-    const { buildOrganizePlan } = await import("../organize.js");
-    const { _invalidateNotesCache } = await import("../fs.js");
-    const { _invalidateSemanticCache } = await import("../semanticIndex.js");
+    const { buildOrganizePlan } = await import("@/core/organize.js");
+    const { _invalidateNotesCache } = await import("@/core/fs.js");
+    const { _invalidateSemanticCache } = await import("@/core/semanticIndex.js");
 
     _invalidateNotesCache();
     _invalidateSemanticCache();
@@ -259,9 +259,9 @@ describe("buildOrganizePlan — carve-out enforcement", () => {
 
 describe("buildOrganizePlan — collision handling", () => {
   test("two notes wanting the same target: first wins, second goes to unassigned", async () => {
-    const { buildOrganizePlan } = await import("../organize.js");
-    const { _invalidateNotesCache } = await import("../fs.js");
-    const { _invalidateSemanticCache } = await import("../semanticIndex.js");
+    const { buildOrganizePlan } = await import("@/core/organize.js");
+    const { _invalidateNotesCache } = await import("@/core/fs.js");
+    const { _invalidateSemanticCache } = await import("@/core/semanticIndex.js");
 
     _invalidateNotesCache();
     _invalidateSemanticCache();
@@ -309,9 +309,9 @@ describe("buildOrganizePlan — collision handling", () => {
 
 describe("buildOrganizePlan — determinism", () => {
   test("two calls on the same KB produce identical plans", async () => {
-    const { buildOrganizePlan } = await import("../organize.js");
-    const { _invalidateNotesCache } = await import("../fs.js");
-    const { _invalidateSemanticCache } = await import("../semanticIndex.js");
+    const { buildOrganizePlan } = await import("@/core/organize.js");
+    const { _invalidateNotesCache } = await import("@/core/fs.js");
+    const { _invalidateSemanticCache } = await import("@/core/semanticIndex.js");
 
     _invalidateNotesCache();
     _invalidateSemanticCache();
@@ -356,9 +356,9 @@ describe("buildOrganizePlan — determinism", () => {
 
 describe("buildOrganizePlan — incremental mode", () => {
   test("mode:'incremental' throws when clusters.json is absent", async () => {
-    const { buildOrganizePlan, OrganizeError } = await import("../organize.js");
-    const { _invalidateNotesCache } = await import("../fs.js");
-    const { _invalidateSemanticCache } = await import("../semanticIndex.js");
+    const { buildOrganizePlan, OrganizeError } = await import("@/core/organize.js");
+    const { _invalidateNotesCache } = await import("@/core/fs.js");
+    const { _invalidateSemanticCache } = await import("@/core/semanticIndex.js");
 
     _invalidateNotesCache();
     _invalidateSemanticCache();
@@ -396,9 +396,9 @@ describe("buildOrganizePlan — incremental mode", () => {
 
 describe("buildOrganizePlan — plan shape", () => {
   test("returns a structurally valid OrganizePlan", async () => {
-    const { buildOrganizePlan } = await import("../organize.js");
-    const { _invalidateNotesCache } = await import("../fs.js");
-    const { _invalidateSemanticCache } = await import("../semanticIndex.js");
+    const { buildOrganizePlan } = await import("@/core/organize.js");
+    const { _invalidateNotesCache } = await import("@/core/fs.js");
+    const { _invalidateSemanticCache } = await import("@/core/semanticIndex.js");
 
     _invalidateNotesCache();
     _invalidateSemanticCache();

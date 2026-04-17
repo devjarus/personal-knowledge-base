@@ -39,7 +39,7 @@ beforeEach(async () => {
   const sub = await fs.mkdtemp(path.join(tmpRoot, "run-"));
   process.env.KB_ROOT = sub;
   // Invalidate notes cache.
-  const { _invalidateNotesCache } = await import("../../fs.js");
+  const { _invalidateNotesCache } = await import("@/core/fs.js");
   _invalidateNotesCache();
 });
 
@@ -112,7 +112,7 @@ describe("buildLearnPlan — empty KB", () => {
   test("returns empty plan for KB with no notes", async () => {
     // KB_ROOT directory exists but has no notes.
     // noLlm: true so the test doesn't depend on Ollama availability.
-    const { buildLearnPlan } = await import("../../learn.js");
+    const { buildLearnPlan } = await import("@/core/learn.js");
     const plan = await buildLearnPlan({ kbRoot: kbRoot(), noLlm: true });
 
     assert.equal(plan.clusters.length, 0, "expected 0 clusters");
@@ -132,7 +132,7 @@ describe("buildLearnPlan — single cluster happy path", () => {
     }
 
     // noLlm: true so the test doesn't depend on Ollama availability.
-    const { buildLearnPlan } = await import("../../learn.js");
+    const { buildLearnPlan } = await import("@/core/learn.js");
     const plan = await buildLearnPlan({ kbRoot: kbRoot(), minNotes: 3, noLlm: true });
 
     assert.equal(plan.clusters.length, 1, `expected 1 cluster but got ${plan.clusters.length}`);
@@ -154,7 +154,7 @@ describe("buildLearnPlan — below minNotes threshold", () => {
     await writeNote(`${folder}/a.md`, {}, "First sentence. Second sentence.");
     await writeNote(`${folder}/b.md`, {}, "Another note. More content.");
 
-    const { buildLearnPlan } = await import("../../learn.js");
+    const { buildLearnPlan } = await import("@/core/learn.js");
     const plan = await buildLearnPlan({ kbRoot: kbRoot(), minNotes: 3 });
 
     // The 2-note folder should produce a skipped cluster OR not appear at all.
@@ -175,7 +175,7 @@ describe("buildLearnPlan — below minNotes threshold", () => {
       await writeNote(`${folder}/note${i}.md`, {}, `Content ${i}. Second sentence.`);
     }
 
-    const { buildLearnPlan } = await import("../../learn.js");
+    const { buildLearnPlan } = await import("@/core/learn.js");
     const plan = await buildLearnPlan({ kbRoot: kbRoot(), minNotes: 3 });
 
     const cluster = plan.clusters.find((c) => c.cluster === folder);
@@ -195,7 +195,7 @@ describe("buildLearnPlan — idempotency", () => {
 
     // noLlm: true on both runs so the generator tier is consistently "extractive"
     // and doesn't depend on Ollama availability.
-    const { buildLearnPlan } = await import("../../learn.js");
+    const { buildLearnPlan } = await import("@/core/learn.js");
     const plan1 = await buildLearnPlan({ kbRoot: kbRoot(), minNotes: 3, noLlm: true });
     const cluster1 = plan1.clusters.find((c) => c.cluster === folder);
     assert.ok(cluster1, "cluster should be found in first plan");
@@ -205,7 +205,7 @@ describe("buildLearnPlan — idempotency", () => {
     await writeSummary(folder, cluster1!.sourceHashes, "extractive");
 
     // Second run — should be fresh.
-    const { _invalidateNotesCache } = await import("../../fs.js");
+    const { _invalidateNotesCache } = await import("@/core/fs.js");
     _invalidateNotesCache();
     const plan2 = await buildLearnPlan({ kbRoot: kbRoot(), minNotes: 3, noLlm: true });
     const cluster2 = plan2.clusters.find((c) => c.cluster === folder);
@@ -224,7 +224,7 @@ describe("buildLearnPlan — idempotency", () => {
     // Write a summary with WRONG hashes.
     await writeSummary(folder, ["deadbeef", "cafebabe", "00001234"], "extractive");
 
-    const { buildLearnPlan } = await import("../../learn.js");
+    const { buildLearnPlan } = await import("@/core/learn.js");
     const plan = await buildLearnPlan({ kbRoot: kbRoot(), minNotes: 3 });
     const cluster = plan.clusters.find((c) => c.cluster === folder);
     assert.ok(cluster, "cluster should be found");
@@ -238,7 +238,7 @@ describe("buildLearnPlan — idempotency", () => {
     await writeNote(`${folder}/a-note.md`, {}, "A note content. Second sentence.");
     await writeNote(`${folder}/m-note.md`, {}, "M note content. Second sentence.");
 
-    const { buildLearnPlan } = await import("../../learn.js");
+    const { buildLearnPlan } = await import("@/core/learn.js");
     const plan = await buildLearnPlan({ kbRoot: kbRoot(), minNotes: 3 });
     const cluster = plan.clusters.find((c) => c.cluster === folder);
     assert.ok(cluster, "cluster should be found");
@@ -254,7 +254,7 @@ describe("buildLearnPlan — idempotency", () => {
       await writeNote(`${folder}/note${i}.md`, {}, `Content ${i}.`);
     }
 
-    const { buildLearnPlan } = await import("../../learn.js");
+    const { buildLearnPlan } = await import("@/core/learn.js");
     // First run to get hashes.
     const plan1 = await buildLearnPlan({ kbRoot: kbRoot(), minNotes: 3 });
     const cluster1 = plan1.clusters.find((c) => c.cluster === folder);
@@ -263,7 +263,7 @@ describe("buildLearnPlan — idempotency", () => {
     // Write matching summary.
     await writeSummary(folder, cluster1!.sourceHashes, "extractive");
 
-    const { _invalidateNotesCache } = await import("../../fs.js");
+    const { _invalidateNotesCache } = await import("@/core/fs.js");
     _invalidateNotesCache();
 
     // Run with force=true — should override fresh to stale.
@@ -284,7 +284,7 @@ describe("buildLearnPlan — carve-outs", () => {
     // Carved-out note.
     await writeNote(`${folder}/carved.md`, { organize: false }, "Carved out content.");
 
-    const { buildLearnPlan } = await import("../../learn.js");
+    const { buildLearnPlan } = await import("@/core/learn.js");
     const plan = await buildLearnPlan({ kbRoot: kbRoot(), minNotes: 3 });
     const cluster = plan.clusters.find((c) => c.cluster === folder);
     assert.ok(cluster, "folder should be a cluster (3 valid notes)");
@@ -305,7 +305,7 @@ describe("buildLearnPlan — carve-outs", () => {
       await writeNote(`ideas/valid/note${i}.md`, {}, `Valid content ${i}.`);
     }
 
-    const { buildLearnPlan } = await import("../../learn.js");
+    const { buildLearnPlan } = await import("@/core/learn.js");
     const plan = await buildLearnPlan({ kbRoot: kbRoot(), minNotes: 3 });
 
     const metaCluster = plan.clusters.find((c) => c.cluster === "meta");
@@ -324,7 +324,7 @@ describe("buildLearnPlan — scoped mode", () => {
       await writeNote(`beta/note${i}.md`, {}, `Beta content ${i}.`);
     }
 
-    const { buildLearnPlan } = await import("../../learn.js");
+    const { buildLearnPlan } = await import("@/core/learn.js");
     const plan = await buildLearnPlan({ kbRoot: kbRoot(), minNotes: 3, clusters: ["alpha"] });
 
     assert.equal(plan.mode, "scoped");
@@ -341,7 +341,7 @@ describe("buildLearnPlan — integration with carve-outs (mixed cluster)", () =>
     }
     await writeNote(`${folder}/pinned.md`, { pinned: true }, "Pinned note content.");
 
-    const { buildLearnPlan } = await import("../../learn.js");
+    const { buildLearnPlan } = await import("@/core/learn.js");
     const plan = await buildLearnPlan({ kbRoot: kbRoot(), minNotes: 3 });
     const cluster = plan.clusters.find((c) => c.cluster === folder);
     assert.ok(cluster, "cluster should exist");

@@ -9,7 +9,7 @@
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { applyRelatedBlock, type ArchiveLink } from "../linkArchive";
+import { applyRelatedBlock, type ArchiveLink } from "@/core/linkArchive";
 
 const links: ArchiveLink[] = [
   { path: "imports/workspace/a.md", title: "Note A", cosine: 0.9 },

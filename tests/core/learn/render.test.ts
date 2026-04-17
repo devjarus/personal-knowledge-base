@@ -15,8 +15,8 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import matter from "gray-matter";
-import { renderSummary } from "../../learn/render.js";
-import type { RenderInput } from "../../learn/render.js";
+import { renderSummary } from "@/core/learn/render.js";
+import type { RenderInput } from "@/core/learn/render.js";
 
 // ---------------------------------------------------------------------------
 // Fixture builder

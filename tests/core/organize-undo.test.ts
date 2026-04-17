@@ -35,15 +35,15 @@ after(async () => {
 beforeEach(async () => {
   const sub = await fs.mkdtemp(path.join(tmpDir, "run-"));
   process.env.KB_ROOT = sub;
-  const { _invalidateNotesCache } = await import("../fs.js");
-  const { _invalidateSemanticCache } = await import("../semanticIndex.js");
+  const { _invalidateNotesCache } = await import("@/core/fs.js");
+  const { _invalidateSemanticCache } = await import("@/core/semanticIndex.js");
   _invalidateNotesCache();
   _invalidateSemanticCache();
 });
 
 afterEach(async () => {
-  const { _invalidateNotesCache } = await import("../fs.js");
-  const { _invalidateSemanticCache } = await import("../semanticIndex.js");
+  const { _invalidateNotesCache } = await import("@/core/fs.js");
+  const { _invalidateSemanticCache } = await import("@/core/semanticIndex.js");
   _invalidateNotesCache();
   _invalidateSemanticCache();
 });
@@ -146,9 +146,9 @@ async function snapshotNotes(root: string): Promise<Map<string, string>> {
 describe("undoLastOrganize — round-trip", () => {
   test("undo restores the pre-apply file tree byte-identically", async () => {
     const { buildOrganizePlan, applyOrganizePlan, undoLastOrganize } =
-      await import("../organize.js");
-    const { _invalidateNotesCache } = await import("../fs.js");
-    const { _invalidateSemanticCache } = await import("../semanticIndex.js");
+      await import("@/core/organize.js");
+    const { _invalidateNotesCache } = await import("@/core/fs.js");
+    const { _invalidateSemanticCache } = await import("@/core/semanticIndex.js");
 
     const root = process.env.KB_ROOT!;
 
@@ -219,9 +219,9 @@ describe("undoLastOrganize — round-trip", () => {
 describe("undoLastOrganize — conflict detection", () => {
   test("user-edited note after apply is reported as conflict and preserved", async () => {
     const { buildOrganizePlan, applyOrganizePlan, undoLastOrganize } =
-      await import("../organize.js");
-    const { _invalidateNotesCache } = await import("../fs.js");
-    const { _invalidateSemanticCache } = await import("../semanticIndex.js");
+      await import("@/core/organize.js");
+    const { _invalidateNotesCache } = await import("@/core/fs.js");
+    const { _invalidateSemanticCache } = await import("@/core/semanticIndex.js");
 
     const root = process.env.KB_ROOT!;
 
@@ -276,9 +276,9 @@ describe("undoLastOrganize — conflict detection", () => {
 
   test("reverted count reflects only successfully undone moves", async () => {
     const { buildOrganizePlan, applyOrganizePlan, undoLastOrganize } =
-      await import("../organize.js");
-    const { _invalidateNotesCache } = await import("../fs.js");
-    const { _invalidateSemanticCache } = await import("../semanticIndex.js");
+      await import("@/core/organize.js");
+    const { _invalidateNotesCache } = await import("@/core/fs.js");
+    const { _invalidateSemanticCache } = await import("@/core/semanticIndex.js");
 
     const root = process.env.KB_ROOT!;
 
@@ -327,9 +327,9 @@ describe("undoLastOrganize — conflict detection", () => {
 
 describe("undoLastOrganize — no ledger", () => {
   test("throws NO_LEDGER when no ledger exists", async () => {
-    const { undoLastOrganize, OrganizeError } = await import("../organize.js");
-    const { _invalidateNotesCache } = await import("../fs.js");
-    const { _invalidateSemanticCache } = await import("../semanticIndex.js");
+    const { undoLastOrganize, OrganizeError } = await import("@/core/organize.js");
+    const { _invalidateNotesCache } = await import("@/core/fs.js");
+    const { _invalidateSemanticCache } = await import("@/core/semanticIndex.js");
 
     const root = process.env.KB_ROOT!;
     await fs.mkdir(path.join(root, ".kb-index"), { recursive: true });
@@ -356,9 +356,9 @@ describe("undoLastOrganize — no ledger", () => {
 describe("undoLastOrganize — ledger renamed", () => {
   test("ledger is renamed to .undone.jsonl after successful undo", async () => {
     const { buildOrganizePlan, applyOrganizePlan, undoLastOrganize } =
-      await import("../organize.js");
-    const { _invalidateNotesCache } = await import("../fs.js");
-    const { _invalidateSemanticCache } = await import("../semanticIndex.js");
+      await import("@/core/organize.js");
+    const { _invalidateNotesCache } = await import("@/core/fs.js");
+    const { _invalidateSemanticCache } = await import("@/core/semanticIndex.js");
 
     const root = process.env.KB_ROOT!;
 
@@ -406,9 +406,9 @@ describe("undoLastOrganize — ledger renamed", () => {
 describe("undoLastOrganize — no double-undo", () => {
   test("after undo, findLatestLedger returns null (nothing left to undo)", async () => {
     const { buildOrganizePlan, applyOrganizePlan, undoLastOrganize, OrganizeError } =
-      await import("../organize.js");
-    const { _invalidateNotesCache } = await import("../fs.js");
-    const { _invalidateSemanticCache } = await import("../semanticIndex.js");
+      await import("@/core/organize.js");
+    const { _invalidateNotesCache } = await import("@/core/fs.js");
+    const { _invalidateSemanticCache } = await import("@/core/semanticIndex.js");
 
     const root = process.env.KB_ROOT!;
 
@@ -452,9 +452,9 @@ describe("undoLastOrganize — no double-undo", () => {
 describe("undoLastOrganize — sidecar reversal", () => {
   test("sidecar has original path key restored after undo", async () => {
     const { buildOrganizePlan, applyOrganizePlan, undoLastOrganize } =
-      await import("../organize.js");
-    const { _invalidateNotesCache } = await import("../fs.js");
-    const { _invalidateSemanticCache } = await import("../semanticIndex.js");
+      await import("@/core/organize.js");
+    const { _invalidateNotesCache } = await import("@/core/fs.js");
+    const { _invalidateSemanticCache } = await import("@/core/semanticIndex.js");
 
     const root = process.env.KB_ROOT!;
 

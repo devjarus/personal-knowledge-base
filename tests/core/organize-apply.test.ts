@@ -42,16 +42,16 @@ beforeEach(async () => {
   const sub = await fs.mkdtemp(path.join(tmpDir, "run-"));
   process.env.KB_ROOT = sub;
   // Invalidate all module-level caches so tests are isolated.
-  const { _invalidateNotesCache } = await import("../fs.js");
-  const { _invalidateSemanticCache } = await import("../semanticIndex.js");
+  const { _invalidateNotesCache } = await import("@/core/fs.js");
+  const { _invalidateSemanticCache } = await import("@/core/semanticIndex.js");
   _invalidateNotesCache();
   _invalidateSemanticCache();
 });
 
 afterEach(async () => {
   // Release any lingering locks.
-  const { _invalidateNotesCache } = await import("../fs.js");
-  const { _invalidateSemanticCache } = await import("../semanticIndex.js");
+  const { _invalidateNotesCache } = await import("@/core/fs.js");
+  const { _invalidateSemanticCache } = await import("@/core/semanticIndex.js");
   _invalidateNotesCache();
   _invalidateSemanticCache();
 });
@@ -118,9 +118,9 @@ async function seedIndex(
 
 describe("applyOrganizePlan — basic moves", () => {
   test("moves files and returns correct stats with ledger", async () => {
-    const { buildOrganizePlan, applyOrganizePlan } = await import("../organize.js");
-    const { _invalidateNotesCache } = await import("../fs.js");
-    const { _invalidateSemanticCache } = await import("../semanticIndex.js");
+    const { buildOrganizePlan, applyOrganizePlan } = await import("@/core/organize.js");
+    const { _invalidateNotesCache } = await import("@/core/fs.js");
+    const { _invalidateSemanticCache } = await import("@/core/semanticIndex.js");
 
     const root = process.env.KB_ROOT!;
 
@@ -164,7 +164,7 @@ describe("applyOrganizePlan — basic moves", () => {
     }
 
     // Ledger file exists and has valid records.
-    const { readLedger } = await import("../organize/ledger.js");
+    const { readLedger } = await import("@/core/organize/ledger.js");
     const records = await readLedger(result.ledgerPath);
     const header = records.find((r) => r.kind === "header");
     const moveRecords = records.filter((r) => r.kind === "move");
@@ -183,9 +183,9 @@ describe("applyOrganizePlan — basic moves", () => {
 
 describe("applyOrganizePlan — empty-dir sweep", () => {
   test("empty parent directory is removed after last note leaves it", async () => {
-    const { buildOrganizePlan, applyOrganizePlan } = await import("../organize.js");
-    const { _invalidateNotesCache } = await import("../fs.js");
-    const { _invalidateSemanticCache } = await import("../semanticIndex.js");
+    const { buildOrganizePlan, applyOrganizePlan } = await import("@/core/organize.js");
+    const { _invalidateNotesCache } = await import("@/core/fs.js");
+    const { _invalidateSemanticCache } = await import("@/core/semanticIndex.js");
 
     const root = process.env.KB_ROOT!;
 
@@ -228,9 +228,9 @@ describe("applyOrganizePlan — empty-dir sweep", () => {
 
 describe("applyOrganizePlan — source file missing at execute time", () => {
   test("move whose source was deleted between manifest-write and execute is skipped", async () => {
-    const { applyOrganizePlan } = await import("../organize.js");
-    const { _invalidateNotesCache } = await import("../fs.js");
-    const { _invalidateSemanticCache } = await import("../semanticIndex.js");
+    const { applyOrganizePlan } = await import("@/core/organize.js");
+    const { _invalidateNotesCache } = await import("@/core/fs.js");
+    const { _invalidateSemanticCache } = await import("@/core/semanticIndex.js");
 
     const root = process.env.KB_ROOT!;
 
@@ -250,7 +250,7 @@ describe("applyOrganizePlan — source file missing at execute time", () => {
     // We bypass buildOrganizePlan to have precise control.
     const ragAbs = path.join(root, "rag-deleted.md");
     const agentsAbs = path.join(root, "agents-stable2.md");
-    const { hashFile } = await import("../organize/ledger.js");
+    const { hashFile } = await import("@/core/organize/ledger.js");
     const ragHash = await hashFile(ragAbs);
     const agentsHash = await hashFile(agentsAbs);
 
@@ -308,9 +308,9 @@ describe("applyOrganizePlan — source file missing at execute time", () => {
 
 describe("applyOrganizePlan — no-op moves", () => {
   test("move where from === to is not executed and not counted", async () => {
-    const { applyOrganizePlan } = await import("../organize.js");
-    const { _invalidateNotesCache } = await import("../fs.js");
-    const { _invalidateSemanticCache } = await import("../semanticIndex.js");
+    const { applyOrganizePlan } = await import("@/core/organize.js");
+    const { _invalidateNotesCache } = await import("@/core/fs.js");
+    const { _invalidateSemanticCache } = await import("@/core/semanticIndex.js");
 
     const root = process.env.KB_ROOT!;
 
@@ -358,9 +358,9 @@ describe("applyOrganizePlan — no-op moves", () => {
 
 describe("applyOrganizePlan — stale lock", () => {
   test("stale lock with non-existent PID is cleared and apply proceeds", async () => {
-    const { applyOrganizePlan } = await import("../organize.js");
-    const { _invalidateNotesCache } = await import("../fs.js");
-    const { _invalidateSemanticCache } = await import("../semanticIndex.js");
+    const { applyOrganizePlan } = await import("@/core/organize.js");
+    const { _invalidateNotesCache } = await import("@/core/fs.js");
+    const { _invalidateSemanticCache } = await import("@/core/semanticIndex.js");
 
     const root = process.env.KB_ROOT!;
 
@@ -373,7 +373,7 @@ describe("applyOrganizePlan — stale lock", () => {
 
     // Write a stale lock with a PID that definitely does not exist.
     // PID 999999999 is astronomically unlikely to be running on any real system.
-    const { lockPath, ledgerDir: getLedgerDir } = await import("../organize/ledger.js");
+    const { lockPath, ledgerDir: getLedgerDir } = await import("@/core/organize/ledger.js");
     await fs.mkdir(getLedgerDir(root), { recursive: true });
     await fs.writeFile(lockPath(root), "999999999", "utf8");
 
@@ -404,9 +404,9 @@ describe("applyOrganizePlan — stale lock", () => {
 
 describe("applyOrganizePlan — lock enforcement", () => {
   test("second apply while lock is held by current PID throws LOCK_HELD error", async () => {
-    const { applyOrganizePlan, OrganizeError } = await import("../organize.js");
-    const { _invalidateNotesCache } = await import("../fs.js");
-    const { _invalidateSemanticCache } = await import("../semanticIndex.js");
+    const { applyOrganizePlan, OrganizeError } = await import("@/core/organize.js");
+    const { _invalidateNotesCache } = await import("@/core/fs.js");
+    const { _invalidateSemanticCache } = await import("@/core/semanticIndex.js");
 
     const root = process.env.KB_ROOT!;
 
@@ -417,7 +417,7 @@ describe("applyOrganizePlan — lock enforcement", () => {
     _invalidateSemanticCache();
 
     // Write a lock for the CURRENT PID (simulate "this process holds the lock").
-    const { lockPath, ledgerDir: getLedgerDir } = await import("../organize/ledger.js");
+    const { lockPath, ledgerDir: getLedgerDir } = await import("@/core/organize/ledger.js");
     await fs.mkdir(getLedgerDir(root), { recursive: true });
     await fs.writeFile(lockPath(root), String(process.pid), "utf8");
 
@@ -452,10 +452,10 @@ describe("applyOrganizePlan — lock enforcement", () => {
 
 describe("applyOrganizePlan — ledger structure", () => {
   test("ledger contains header, one move record per planned move, and commit", async () => {
-    const { buildOrganizePlan, applyOrganizePlan } = await import("../organize.js");
-    const { _invalidateNotesCache } = await import("../fs.js");
-    const { _invalidateSemanticCache } = await import("../semanticIndex.js");
-    const { readLedger } = await import("../organize/ledger.js");
+    const { buildOrganizePlan, applyOrganizePlan } = await import("@/core/organize.js");
+    const { _invalidateNotesCache } = await import("@/core/fs.js");
+    const { _invalidateSemanticCache } = await import("@/core/semanticIndex.js");
+    const { readLedger } = await import("@/core/organize/ledger.js");
 
     const root = process.env.KB_ROOT!;
 
@@ -506,9 +506,9 @@ describe("applyOrganizePlan — ledger structure", () => {
 
 describe("applyOrganizePlan — sidecar rename", () => {
   test("sidecar has new path key and old path key is gone after apply", async () => {
-    const { buildOrganizePlan, applyOrganizePlan } = await import("../organize.js");
-    const { _invalidateNotesCache } = await import("../fs.js");
-    const { _invalidateSemanticCache } = await import("../semanticIndex.js");
+    const { buildOrganizePlan, applyOrganizePlan } = await import("@/core/organize.js");
+    const { _invalidateNotesCache } = await import("@/core/fs.js");
+    const { _invalidateSemanticCache } = await import("@/core/semanticIndex.js");
 
     const root = process.env.KB_ROOT!;
 
@@ -561,7 +561,7 @@ describe("applyOrganizePlan — sidecar rename", () => {
 
 describe("moveNote — EXDEV fallback", () => {
   test("when rename throws EXDEV, falls back to cp+rm", async () => {
-    const { moveNote } = await import("../organize/move.js");
+    const { moveNote } = await import("@/core/organize/move.js");
 
     const root = process.env.KB_ROOT!;
 

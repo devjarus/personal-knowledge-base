@@ -32,7 +32,7 @@ after(async () => {
 beforeEach(async () => {
   const sub = await fs.mkdtemp(path.join(tmpDir, "run-"));
   process.env.KB_ROOT = sub;
-  const { _invalidateNotesCache } = await import("../../fs.js");
+  const { _invalidateNotesCache } = await import("@/core/fs.js");
   _invalidateNotesCache();
 });
 
@@ -61,7 +61,7 @@ async function writeNote(
 }
 
 async function buildSimplePlan(clusterPath: string, notes: string[], status: "new" | "stale" | "fresh") {
-  const { hashSources } = await import("../../learn/sourceHashes.js");
+  const { hashSources } = await import("@/core/learn/sourceHashes.js");
   const sourceHashes = await hashSources(root(), notes);
   return {
     generatedAt: new Date().toISOString(),
@@ -83,7 +83,7 @@ async function buildSimplePlan(clusterPath: string, notes: string[], status: "ne
 
 describe("undoLastLearn", () => {
   test("throws NO_LEDGER when no ledger exists", async () => {
-    const { undoLastLearn, LearnError } = await import("../../learn.js");
+    const { undoLastLearn, LearnError } = await import("@/core/learn.js");
 
     await assert.rejects(
       () => undoLastLearn(),
@@ -96,8 +96,8 @@ describe("undoLastLearn", () => {
   });
 
   test("throws LOCK_HELD when learn lock is held", async () => {
-    const { applyLearnPlan, undoLastLearn, LearnError } = await import("../../learn.js");
-    const { learnLockPath } = await import("../../learn/ledger.js");
+    const { applyLearnPlan, undoLastLearn, LearnError } = await import("@/core/learn.js");
+    const { learnLockPath } = await import("@/core/learn/ledger.js");
 
     // Create a cluster and apply to generate a ledger.
     await writeNote("ideas/lockundo/n1.md", { title: "L1" });
@@ -130,7 +130,7 @@ describe("undoLastLearn", () => {
   });
 
   test("new-file undo: summary moved to trash", async () => {
-    const { applyLearnPlan, undoLastLearn } = await import("../../learn.js");
+    const { applyLearnPlan, undoLastLearn } = await import("@/core/learn.js");
 
     await writeNote("ideas/newundo/n1.md", { title: "N1", tags: ["t"] });
     await writeNote("ideas/newundo/n2.md", { title: "N2", tags: ["t"] });
@@ -164,7 +164,7 @@ describe("undoLastLearn", () => {
   });
 
   test("overwrite undo: previousContent restored byte-for-byte", async () => {
-    const { applyLearnPlan, undoLastLearn } = await import("../../learn.js");
+    const { applyLearnPlan, undoLastLearn } = await import("@/core/learn.js");
 
     await writeNote("ideas/prevundo/n1.md", { title: "P1", tags: ["x"] });
     await writeNote("ideas/prevundo/n2.md", { title: "P2", tags: ["y"] });
@@ -209,7 +209,7 @@ describe("undoLastLearn", () => {
   });
 
   test("user-edited conflict: left in place and reported", async () => {
-    const { applyLearnPlan, undoLastLearn } = await import("../../learn.js");
+    const { applyLearnPlan, undoLastLearn } = await import("@/core/learn.js");
 
     await writeNote("ideas/editundo/n1.md", { title: "E1" });
     await writeNote("ideas/editundo/n2.md", { title: "E2" });
@@ -241,8 +241,8 @@ describe("undoLastLearn", () => {
   });
 
   test("partial-ledger tolerance: missing file is skipped gracefully", async () => {
-    const { applyLearnPlan, undoLastLearn } = await import("../../learn.js");
-    const { appendLearnRecord } = await import("../../learn/ledger.js");
+    const { applyLearnPlan, undoLastLearn } = await import("@/core/learn.js");
+    const { appendLearnRecord } = await import("@/core/learn/ledger.js");
 
     await writeNote("ideas/partial/n1.md", { title: "P" });
     await writeNote("ideas/partial/n2.md", { title: "Q" });
@@ -272,7 +272,7 @@ describe("undoLastLearn", () => {
   });
 
   test("ledger renamed to .undone.jsonl after success", async () => {
-    const { applyLearnPlan, undoLastLearn } = await import("../../learn.js");
+    const { applyLearnPlan, undoLastLearn } = await import("@/core/learn.js");
 
     await writeNote("ideas/renamed/n1.md", { title: "R1" });
     await writeNote("ideas/renamed/n2.md", { title: "R2" });
@@ -300,7 +300,7 @@ describe("undoLastLearn", () => {
   });
 
   test("already-undone ledger: cannot undo again (NO_LEDGER)", async () => {
-    const { applyLearnPlan, undoLastLearn, LearnError } = await import("../../learn.js");
+    const { applyLearnPlan, undoLastLearn, LearnError } = await import("@/core/learn.js");
 
     await writeNote("ideas/twice/n1.md", { title: "T1" });
     await writeNote("ideas/twice/n2.md", { title: "T2" });

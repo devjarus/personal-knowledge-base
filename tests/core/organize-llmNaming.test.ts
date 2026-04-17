@@ -15,8 +15,8 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 
-import { nameClusters, _resetGenerator } from "../organize/llmNaming.js";
-import type { ClusterForNaming } from "../organize/llmNaming.js";
+import { nameClusters, _resetGenerator } from "@/core/organize/llmNaming.js";
+import type { ClusterForNaming } from "@/core/organize/llmNaming.js";
 
 // ---------------------------------------------------------------------------
 // Fixtures

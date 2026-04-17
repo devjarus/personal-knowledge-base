@@ -43,15 +43,15 @@ beforeEach(async () => {
   const sub = await fs.mkdtemp(path.join(tmpDir, "run-"));
   process.env.KB_ROOT = sub;
 
-  const { _invalidateNotesCache } = await import("../fs.js");
-  const { _invalidateSemanticCache } = await import("../semanticIndex.js");
+  const { _invalidateNotesCache } = await import("@/core/fs.js");
+  const { _invalidateSemanticCache } = await import("@/core/semanticIndex.js");
   _invalidateNotesCache();
   _invalidateSemanticCache();
 });
 
 afterEach(async () => {
-  const { _invalidateNotesCache } = await import("../fs.js");
-  const { _invalidateSemanticCache } = await import("../semanticIndex.js");
+  const { _invalidateNotesCache } = await import("@/core/fs.js");
+  const { _invalidateSemanticCache } = await import("@/core/semanticIndex.js");
   _invalidateNotesCache();
   _invalidateSemanticCache();
   delete process.env.KB_ROOT;
@@ -135,7 +135,7 @@ async function snapshotTree(root: string): Promise<Map<string, string>> {
 
 describe("wiki-path link rewriting", () => {
   test("[[old/a]] is rewritten to [[new/a]] when old/a.md moves to new/a.md", async () => {
-    const { computeLinkRewrites } = await import("../organize/rewriteLinks.js");
+    const { computeLinkRewrites } = await import("@/core/organize/rewriteLinks.js");
     const root = process.env.KB_ROOT!;
 
     // Target note being moved.
@@ -157,7 +157,7 @@ describe("wiki-path link rewriting", () => {
   });
 
   test("[[old/a.md]] (with extension) is rewritten to [[new/a.md]]", async () => {
-    const { computeLinkRewrites } = await import("../organize/rewriteLinks.js");
+    const { computeLinkRewrites } = await import("@/core/organize/rewriteLinks.js");
     const root = process.env.KB_ROOT!;
 
     await writeRawNote("old/a.md", "# A\n");
@@ -180,7 +180,7 @@ describe("wiki-path link rewriting", () => {
 
 describe("wiki-slug no-rewrite rule", () => {
   test("[[a]] (basename-only) is NOT rewritten even when a.md moves", async () => {
-    const { computeLinkRewrites } = await import("../organize/rewriteLinks.js");
+    const { computeLinkRewrites } = await import("@/core/organize/rewriteLinks.js");
     const root = process.env.KB_ROOT!;
 
     await writeRawNote("old/a.md", "# A\n");
@@ -202,7 +202,7 @@ describe("wiki-slug no-rewrite rule", () => {
 
 describe("md-path link rewriting", () => {
   test("[text](old/a.md) is rewritten to [text](new/a.md)", async () => {
-    const { computeLinkRewrites } = await import("../organize/rewriteLinks.js");
+    const { computeLinkRewrites } = await import("@/core/organize/rewriteLinks.js");
     const root = process.env.KB_ROOT!;
 
     await writeRawNote("old/a.md", "# A\n");
@@ -225,7 +225,7 @@ describe("md-path link rewriting", () => {
 
 describe("md-external no-rewrite rule", () => {
   test("[text](https://example.com) is never rewritten", async () => {
-    const { computeLinkRewrites } = await import("../organize/rewriteLinks.js");
+    const { computeLinkRewrites } = await import("@/core/organize/rewriteLinks.js");
     const root = process.env.KB_ROOT!;
 
     await writeRawNote("old/a.md", "# A\n");
@@ -246,7 +246,7 @@ describe("md-external no-rewrite rule", () => {
 
 describe("multiple links on one line", () => {
   test("two [[old/a]] on one line both rewritten; distinct byteOffsets", async () => {
-    const { computeLinkRewrites } = await import("../organize/rewriteLinks.js");
+    const { computeLinkRewrites } = await import("@/core/organize/rewriteLinks.js");
     const root = process.env.KB_ROOT!;
 
     await writeRawNote("old/a.md", "# A\n");
@@ -275,7 +275,7 @@ describe("multiple links on one line", () => {
 
 describe("already-broken link handling", () => {
   test("[[does-not-exist]] left alone — not a moved target", async () => {
-    const { computeLinkRewrites } = await import("../organize/rewriteLinks.js");
+    const { computeLinkRewrites } = await import("@/core/organize/rewriteLinks.js");
     const root = process.env.KB_ROOT!;
 
     await writeRawNote("old/a.md", "# A\n");
@@ -300,7 +300,7 @@ describe("already-broken link handling", () => {
 
 describe("md-relative path rewriting", () => {
   test("[x](./a.md) in foo/b.md when foo/a.md → bar/a.md → ../bar/a.md", async () => {
-    const { computeLinkRewrites } = await import("../organize/rewriteLinks.js");
+    const { computeLinkRewrites } = await import("@/core/organize/rewriteLinks.js");
     const root = process.env.KB_ROOT!;
 
     await writeRawNote("foo/a.md", "# A\n");
@@ -320,7 +320,7 @@ describe("md-relative path rewriting", () => {
   });
 
   test("md-relative both-move: foo/a.md→alpha/a.md and foo/b.md→beta/b.md", async () => {
-    const { computeLinkRewrites } = await import("../organize/rewriteLinks.js");
+    const { computeLinkRewrites } = await import("@/core/organize/rewriteLinks.js");
     const root = process.env.KB_ROOT!;
 
     await writeRawNote("foo/a.md", "# A\n");
@@ -351,8 +351,8 @@ describe("md-relative path rewriting", () => {
 describe("undo roundtrip", () => {
   test("after apply + undo all files are byte-identical to pre-apply", async () => {
     const root = process.env.KB_ROOT!;
-    const { _invalidateNotesCache } = await import("../fs.js");
-    const { _invalidateSemanticCache } = await import("../semanticIndex.js");
+    const { _invalidateNotesCache } = await import("@/core/fs.js");
+    const { _invalidateSemanticCache } = await import("@/core/semanticIndex.js");
 
     // Set up two notes where one links to the other.
     await writeRawNote("old/a.md", "# A\n\nTarget note.\n");
@@ -365,11 +365,11 @@ describe("undo roundtrip", () => {
     _invalidateNotesCache();
     _invalidateSemanticCache();
 
-    const { applyOrganizePlan, undoLastOrganize } = await import("../organize.js");
+    const { applyOrganizePlan, undoLastOrganize } = await import("@/core/organize.js");
 
     // Build a plan manually — we just need moves for old/a.md.
     // We import buildOrganizePlan but give it a move manually via plan construction.
-    const { buildOrganizePlan } = await import("../organize.js");
+    const { buildOrganizePlan } = await import("@/core/organize.js");
     const plan = await buildOrganizePlan({ mode: "full", kbRoot: root });
 
     // Make sure there's at least the move we set up.
@@ -433,8 +433,8 @@ describe("undo roundtrip", () => {
 describe("rewriteLinks: false option", () => {
   test("plan.rewrites is empty when rewriteLinks: false", async () => {
     const root = process.env.KB_ROOT!;
-    const { _invalidateNotesCache } = await import("../fs.js");
-    const { _invalidateSemanticCache } = await import("../semanticIndex.js");
+    const { _invalidateNotesCache } = await import("@/core/fs.js");
+    const { _invalidateSemanticCache } = await import("@/core/semanticIndex.js");
 
     await writeRawNote("old/a.md", "# A\n");
     await writeRawNote("refs.md", "See [[old/a]] here.\n");
@@ -443,7 +443,7 @@ describe("rewriteLinks: false option", () => {
     _invalidateNotesCache();
     _invalidateSemanticCache();
 
-    const { buildOrganizePlan } = await import("../organize.js");
+    const { buildOrganizePlan } = await import("@/core/organize.js");
     const plan = await buildOrganizePlan({ mode: "full", kbRoot: root, rewriteLinks: false });
 
     assert.equal(plan.rewrites.length, 0, "rewrites must be empty when rewriteLinks is false");
@@ -457,9 +457,9 @@ describe("rewriteLinks: false option", () => {
 describe("integration: zero new broken links after apply", () => {
   test("apply with link rewriting leaves no new broken links in the KB", async () => {
     const root = process.env.KB_ROOT!;
-    const { _invalidateNotesCache } = await import("../fs.js");
-    const { _invalidateSemanticCache } = await import("../semanticIndex.js");
-    const { _invalidateLinkIndexCache } = await import("../links.js");
+    const { _invalidateNotesCache } = await import("@/core/fs.js");
+    const { _invalidateSemanticCache } = await import("@/core/semanticIndex.js");
+    const { _invalidateLinkIndexCache } = await import("@/core/links.js");
 
     // Note A: has a tag so it gets moved. Note B: references A by path.
     await writeRawNote("imports/a.md", "---\ntags: [agents]\n---\n# A\n\nContent.\n");
@@ -471,12 +471,12 @@ describe("integration: zero new broken links after apply", () => {
     _invalidateSemanticCache();
     _invalidateLinkIndexCache();
 
-    const { buildLinkIndex } = await import("../links.js");
+    const { buildLinkIndex } = await import("@/core/links.js");
     const baseIndex = await buildLinkIndex();
     const baseBrokenCount = baseIndex.broken.length;
 
     // Build + apply plan.
-    const { buildOrganizePlan, applyOrganizePlan } = await import("../organize.js");
+    const { buildOrganizePlan, applyOrganizePlan } = await import("@/core/organize.js");
 
     _invalidateNotesCache();
     _invalidateSemanticCache();
@@ -515,8 +515,8 @@ describe("integration: zero new broken links after apply", () => {
 describe("ledger rewrite records", () => {
   test("ledger contains rewrite records after apply; undo reverses file content", async () => {
     const root = process.env.KB_ROOT!;
-    const { _invalidateNotesCache } = await import("../fs.js");
-    const { _invalidateSemanticCache } = await import("../semanticIndex.js");
+    const { _invalidateNotesCache } = await import("@/core/fs.js");
+    const { _invalidateSemanticCache } = await import("@/core/semanticIndex.js");
 
     await writeRawNote("old/a.md", "---\ntags: [agents]\n---\n# A\n\nContent.\n");
     await writeRawNote("refs.md", "Link: [[old/a]]\n");
@@ -525,7 +525,7 @@ describe("ledger rewrite records", () => {
     _invalidateNotesCache();
     _invalidateSemanticCache();
 
-    const { buildOrganizePlan, applyOrganizePlan, undoLastOrganize } = await import("../organize.js");
+    const { buildOrganizePlan, applyOrganizePlan, undoLastOrganize } = await import("@/core/organize.js");
     const plan = await buildOrganizePlan({ mode: "full", kbRoot: root });
 
     const moveA = plan.moves.find((m) => m.from === "old/a.md");
@@ -543,7 +543,7 @@ describe("ledger rewrite records", () => {
     const applyResult = await applyOrganizePlan(targetPlan, {});
 
     // Verify ledger has rewrite records.
-    const { readLedger } = await import("../organize/ledger.js");
+    const { readLedger } = await import("@/core/organize/ledger.js");
     const records = await readLedger(applyResult.ledgerPath);
     const rewriteRecords = records.filter((r) => r.kind === "rewrite");
 

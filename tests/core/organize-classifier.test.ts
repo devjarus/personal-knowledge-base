@@ -6,10 +6,10 @@
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import type { NoteSummary } from "../types.js";
+import type { NoteSummary } from "@/core/types.js";
 
 async function getClassifier() {
-  const { classifyByFrontmatter } = await import("../organize/classifier.js");
+  const { classifyByFrontmatter } = await import("@/core/organize/classifier.js");
   return classifyByFrontmatter;
 }
 

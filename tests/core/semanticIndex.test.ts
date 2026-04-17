@@ -76,7 +76,7 @@ async function seedNotes(notes: Array<{ path: string; body: string }>): Promise<
 describe("JSONL round-trip", () => {
   test("writes rows and reads them back via loadIndex", async () => {
     const { sidecarPath, loadIndex, _invalidateSemanticCache, _setEmbedderForTests, refreshIndex } =
-      await import("../semanticIndex.js");
+      await import("@/core/semanticIndex.js");
 
     _invalidateSemanticCache();
 
@@ -142,8 +142,8 @@ describe("Cosine math", () => {
 
 describe("Top-K ordering", () => {
   test("queryTopK returns correct top 3 in descending cosine order", async () => {
-    const { queryTopK } = await import("../semanticIndex.js");
-    type IndexRow = import("../semanticIndex.js").IndexRow;
+    const { queryTopK } = await import("@/core/semanticIndex.js");
+    type IndexRow = import("@/core/semanticIndex.js").IndexRow;
 
     // Query vector: e1 (standard basis in 384 dims).
     const qVec = new Float32Array(384).fill(0);
@@ -189,7 +189,7 @@ describe("Top-K ordering", () => {
 describe("Sig invalidation", () => {
   test("refreshIndex re-embeds rows whose sig changed", async () => {
     const { _invalidateSemanticCache, _setEmbedderForTests, refreshIndex } =
-      await import("../semanticIndex.js");
+      await import("@/core/semanticIndex.js");
 
     _invalidateSemanticCache();
 
@@ -228,7 +228,7 @@ describe("Sig invalidation", () => {
 describe("Missing-sidecar load", () => {
   test("loadIndex returns empty map when sidecar is absent", async () => {
     const { sidecarPath, loadIndex, _invalidateSemanticCache } =
-      await import("../semanticIndex.js");
+      await import("@/core/semanticIndex.js");
 
     _invalidateSemanticCache();
 
@@ -249,7 +249,7 @@ describe("Missing-sidecar load", () => {
 describe("Atomic write", () => {
   test("original sidecar is preserved if rename does not happen", async () => {
     const { sidecarPath, _invalidateSemanticCache } =
-      await import("../semanticIndex.js");
+      await import("@/core/semanticIndex.js");
 
     _invalidateSemanticCache();
 

@@ -36,7 +36,7 @@ const execFileAsync = promisify(execFile);
 // LOAD-BEARING: use fileURLToPath(import.meta.url) — tsx in CJS mode does not
 // populate import.meta.dirname, so we derive __dirname from the URL manually.
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const pkgRoot = path.resolve(__dirname, "../../..");
+const pkgRoot = path.resolve(__dirname, "../..");
 const tsxBin = path.join(pkgRoot, "node_modules", "tsx", "dist", "cli.mjs");
 const cliEntry = path.join(pkgRoot, "src", "cli", "index.ts");
 

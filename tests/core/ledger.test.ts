@@ -26,7 +26,7 @@ import {
   releaseLock,
   hashFile,
   isLockHeld,
-} from "../ledger.js";
+} from "@/core/ledger.js";
 
 // ---------------------------------------------------------------------------
 // Fixture

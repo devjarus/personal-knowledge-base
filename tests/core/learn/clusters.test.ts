@@ -66,13 +66,13 @@ async function writeFakeOrganizeLedger(moves: { from: string; to: string }[]): P
 describe("discoverClusters", () => {
   describe("fallback scan (no organize ledger)", () => {
     test("empty KB returns empty array", async () => {
-      const { discoverClusters } = await import("../../learn/clusters.js");
+      const { discoverClusters } = await import("@/core/learn/clusters.js");
       const result = await discoverClusters(root(), { minNotes: 3 });
       assert.deepEqual(result, []);
     });
 
     test("folder with >= minNotes .md files is included", async () => {
-      const { discoverClusters } = await import("../../learn/clusters.js");
+      const { discoverClusters } = await import("@/core/learn/clusters.js");
 
       await writeNote("science/biology/note1.md");
       await writeNote("science/biology/note2.md");
@@ -85,7 +85,7 @@ describe("discoverClusters", () => {
     });
 
     test("folder below minNotes threshold excluded", async () => {
-      const { discoverClusters } = await import("../../learn/clusters.js");
+      const { discoverClusters } = await import("@/core/learn/clusters.js");
 
       await writeNote("small/n1.md");
       await writeNote("small/n2.md");
@@ -96,7 +96,7 @@ describe("discoverClusters", () => {
     });
 
     test("_summary.md excluded from note count", async () => {
-      const { discoverClusters } = await import("../../learn/clusters.js");
+      const { discoverClusters } = await import("@/core/learn/clusters.js");
 
       await writeNote("cluster/n1.md");
       await writeNote("cluster/n2.md");
@@ -113,7 +113,7 @@ describe("discoverClusters", () => {
     });
 
     test("dotfiles and ignored dirs skipped", async () => {
-      const { discoverClusters } = await import("../../learn/clusters.js");
+      const { discoverClusters } = await import("@/core/learn/clusters.js");
 
       // Create notes in an ignored dir.
       await writeNote(".hidden/n1.md");
@@ -132,7 +132,7 @@ describe("discoverClusters", () => {
     });
 
     test("clusters sorted by path", async () => {
-      const { discoverClusters } = await import("../../learn/clusters.js");
+      const { discoverClusters } = await import("@/core/learn/clusters.js");
 
       await writeNote("zzz/n1.md");
       await writeNote("zzz/n2.md");
@@ -150,7 +150,7 @@ describe("discoverClusters", () => {
 
   describe("ledger-aware path (organize ledger exists)", () => {
     test("uses move.to folders as cluster definitions", async () => {
-      const { discoverClusters } = await import("../../learn/clusters.js");
+      const { discoverClusters } = await import("@/core/learn/clusters.js");
 
       // Create the notes at their "after-organize" locations.
       await writeNote("ideas/ml/attention.md");
@@ -171,7 +171,7 @@ describe("discoverClusters", () => {
     });
 
     test("ledger-aware: folders below minNotes threshold excluded", async () => {
-      const { discoverClusters } = await import("../../learn/clusters.js");
+      const { discoverClusters } = await import("@/core/learn/clusters.js");
 
       // Only 2 notes in the ledger destination.
       await writeNote("ideas/tiny/n1.md");
@@ -188,7 +188,7 @@ describe("discoverClusters", () => {
     });
 
     test("ledger-aware: _summary.md excluded from note list", async () => {
-      const { discoverClusters } = await import("../../learn/clusters.js");
+      const { discoverClusters } = await import("@/core/learn/clusters.js");
 
       await writeNote("ideas/withsummary/n1.md");
       await writeNote("ideas/withsummary/n2.md");
@@ -216,7 +216,7 @@ describe("discoverClusters", () => {
     });
 
     test("falls back to scan when ledger has no move records", async () => {
-      const { discoverClusters } = await import("../../learn/clusters.js");
+      const { discoverClusters } = await import("@/core/learn/clusters.js");
 
       // Write a ledger with ONLY a header and commit — no moves.
       const ledgerDir = path.join(root(), ".kb-index", "organize");

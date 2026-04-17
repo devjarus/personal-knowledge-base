@@ -85,10 +85,10 @@ after(async () => {
 beforeEach(async () => {
   const sub = await fs.mkdtemp(path.join(tmpDir, "run-"));
   process.env.KB_ROOT = sub;
-  const { _invalidateNotesCache } = await import("../../fs.js");
+  const { _invalidateNotesCache } = await import("@/core/fs.js");
   _invalidateNotesCache();
   // Reset semantic index cache between runs.
-  const { _invalidateSemanticCache } = await import("../../semanticIndex.js");
+  const { _invalidateSemanticCache } = await import("@/core/semanticIndex.js");
   _invalidateSemanticCache();
 });
 
@@ -126,7 +126,7 @@ async function buildPlan(
   status: "new" | "stale",
   generator: "ollama" | "extractive" = "extractive"
 ) {
-  const { hashSources } = await import("../../learn/sourceHashes.js");
+  const { hashSources } = await import("@/core/learn/sourceHashes.js");
   const sourceHashes = await hashSources(root(), notes);
   return {
     generatedAt: new Date().toISOString(),
@@ -158,8 +158,8 @@ async function buildPlan(
 
 describe("applyLearnPlan Phase 3", () => {
   test("noLlm=true: skips Ollama, records generator=extractive in ledger", async () => {
-    const { applyLearnPlan } = await import("../../learn.js");
-    const { readLearnLedger } = await import("../../learn/ledger.js");
+    const { applyLearnPlan } = await import("@/core/learn.js");
+    const { readLearnLedger } = await import("@/core/learn/ledger.js");
 
     let fetchCalled = false;
     installFetchMock(async () => {
@@ -189,7 +189,7 @@ describe("applyLearnPlan Phase 3", () => {
     // Ledger should record generator=extractive and model=null.
     const records = await readLearnLedger(result.ledgerPath);
     const writeRecord = records.find((r) => r.kind === "learning-write") as
-      | import("../../learn/ledger.js").LearnLedgerWriteRecord
+      | import("@/core/learn/ledger.js").LearnLedgerWriteRecord
       | undefined;
     assert.ok(writeRecord, "should have a learning-write record");
     assert.equal(writeRecord.generator, "extractive", "ledger generator should be extractive");
@@ -197,8 +197,8 @@ describe("applyLearnPlan Phase 3", () => {
   });
 
   test("Ollama success: records model='ollama:<tag>' in ledger and summary frontmatter", async () => {
-    const { applyLearnPlan } = await import("../../learn.js");
-    const { readLearnLedger } = await import("../../learn/ledger.js");
+    const { applyLearnPlan } = await import("@/core/learn.js");
+    const { readLearnLedger } = await import("@/core/learn/ledger.js");
 
     installFetchMock(async (url) => {
       if (url.includes("/api/tags")) {
@@ -232,7 +232,7 @@ describe("applyLearnPlan Phase 3", () => {
     // Ledger record.
     const records = await readLearnLedger(result.ledgerPath);
     const writeRecord = records.find((r) => r.kind === "learning-write") as
-      | import("../../learn/ledger.js").LearnLedgerWriteRecord
+      | import("@/core/learn/ledger.js").LearnLedgerWriteRecord
       | undefined;
     assert.ok(writeRecord, "should have a learning-write record");
     assert.equal(writeRecord.generator, "ollama", "ledger generator should be ollama");
@@ -264,8 +264,8 @@ describe("applyLearnPlan Phase 3", () => {
   });
 
   test("Ollama failure (null return): falls back to extractive, records generator=extractive", async () => {
-    const { applyLearnPlan } = await import("../../learn.js");
-    const { readLearnLedger } = await import("../../learn/ledger.js");
+    const { applyLearnPlan } = await import("@/core/learn.js");
+    const { readLearnLedger } = await import("@/core/learn/ledger.js");
 
     // Ollama probe succeeds but generate returns 500.
     installFetchMock(async (url) => {
@@ -302,7 +302,7 @@ describe("applyLearnPlan Phase 3", () => {
     // Ledger record should reflect extractive.
     const records = await readLearnLedger(result.ledgerPath);
     const writeRecord = records.find((r) => r.kind === "learning-write") as
-      | import("../../learn/ledger.js").LearnLedgerWriteRecord
+      | import("@/core/learn/ledger.js").LearnLedgerWriteRecord
       | undefined;
     assert.ok(writeRecord, "should have a learning-write record");
     assert.equal(writeRecord.generator, "extractive");
@@ -338,8 +338,8 @@ describe("applyLearnPlan Phase 3", () => {
      *   cos(c=[0,0,1], centroid) ≈ 0.408
      */
 
-    const { applyLearnPlan } = await import("../../learn.js");
-    const { hashSources } = await import("../../learn/sourceHashes.js");
+    const { applyLearnPlan } = await import("@/core/learn.js");
+    const { hashSources } = await import("@/core/learn/sourceHashes.js");
 
     // Write notes: a, b, c — path-alphabetical order is a, b, c.
     await fs.mkdir(path.join(root(), "ideas/rank"), { recursive: true });

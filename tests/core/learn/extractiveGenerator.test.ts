@@ -15,8 +15,8 @@
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { generateExtractive } from "../../learn/extractiveGenerator.js";
-import type { PromptInput } from "../../learn/prompts.js";
+import { generateExtractive } from "@/core/learn/extractiveGenerator.js";
+import type { PromptInput } from "@/core/learn/prompts.js";
 
 // ---------------------------------------------------------------------------
 // Helpers

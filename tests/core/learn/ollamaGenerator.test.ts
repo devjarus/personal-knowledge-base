@@ -110,7 +110,7 @@ describe("ollamaGenerator", () => {
   });
 
   test("happy path: valid JSON response returns GeneratedSummary + resolvedModel", async () => {
-    const { generateOllama } = await import("../../learn/ollamaGenerator.js");
+    const { generateOllama } = await import("@/core/learn/ollamaGenerator.js");
 
     let generateCalled = false;
     installFetchMock(async (url) => {
@@ -135,7 +135,7 @@ describe("ollamaGenerator", () => {
   });
 
   test("probe fail (Ollama unreachable) returns null", async () => {
-    const { generateOllama } = await import("../../learn/ollamaGenerator.js");
+    const { generateOllama } = await import("@/core/learn/ollamaGenerator.js");
 
     installFetchMock(async () => {
       throw new TypeError("fetch failed: connection refused");
@@ -146,7 +146,7 @@ describe("ollamaGenerator", () => {
   });
 
   test("model not installed returns null", async () => {
-    const { generateOllama } = await import("../../learn/ollamaGenerator.js");
+    const { generateOllama } = await import("@/core/learn/ollamaGenerator.js");
 
     installFetchMock(async (url) => {
       if (url.includes("/api/tags")) {
@@ -164,7 +164,7 @@ describe("ollamaGenerator", () => {
   });
 
   test("HTTP 500 from /api/generate returns null", async () => {
-    const { generateOllama } = await import("../../learn/ollamaGenerator.js");
+    const { generateOllama } = await import("@/core/learn/ollamaGenerator.js");
 
     installFetchMock(async (url) => {
       if (url.includes("/api/tags")) {
@@ -181,7 +181,7 @@ describe("ollamaGenerator", () => {
   });
 
   test("non-JSON body from /api/generate returns null", async () => {
-    const { generateOllama } = await import("../../learn/ollamaGenerator.js");
+    const { generateOllama } = await import("@/core/learn/ollamaGenerator.js");
 
     installFetchMock(async (url) => {
       if (url.includes("/api/tags")) {
@@ -201,7 +201,7 @@ describe("ollamaGenerator", () => {
   });
 
   test("schema validation failure returns null", async () => {
-    const { generateOllama } = await import("../../learn/ollamaGenerator.js");
+    const { generateOllama } = await import("@/core/learn/ollamaGenerator.js");
 
     // Missing required fields (no keyPoints).
     const invalidSummary = { themes: ["A theme"] };
@@ -221,7 +221,7 @@ describe("ollamaGenerator", () => {
   });
 
   test("schema violation (empty themes array) returns null", async () => {
-    const { generateOllama } = await import("../../learn/ollamaGenerator.js");
+    const { generateOllama } = await import("@/core/learn/ollamaGenerator.js");
 
     // themes must have at least 1 item.
     const invalidSummary = {
@@ -245,7 +245,7 @@ describe("ollamaGenerator", () => {
   });
 
   test("timeout (pre-aborted signal) returns null", async () => {
-    const { generateOllama } = await import("../../learn/ollamaGenerator.js");
+    const { generateOllama } = await import("@/core/learn/ollamaGenerator.js");
 
     installFetchMock(async (url, init) => {
       if (url.includes("/api/tags")) {
@@ -279,7 +279,7 @@ describe("ollamaGenerator", () => {
   });
 
   test("malformed outer JSON (no 'response' field) returns null", async () => {
-    const { generateOllama } = await import("../../learn/ollamaGenerator.js");
+    const { generateOllama } = await import("@/core/learn/ollamaGenerator.js");
 
     installFetchMock(async (url) => {
       if (url.includes("/api/tags")) {
@@ -298,7 +298,7 @@ describe("ollamaGenerator", () => {
   });
 
   test("empty response string from Ollama returns null", async () => {
-    const { generateOllama } = await import("../../learn/ollamaGenerator.js");
+    const { generateOllama } = await import("@/core/learn/ollamaGenerator.js");
 
     installFetchMock(async (url) => {
       if (url.includes("/api/tags")) {
@@ -315,7 +315,7 @@ describe("ollamaGenerator", () => {
   });
 
   test("prefix-match: 'llama3.2' matches 'llama3.2:3b' and returns the resolved tag", async () => {
-    const { generateOllama } = await import("../../learn/ollamaGenerator.js");
+    const { generateOllama } = await import("@/core/learn/ollamaGenerator.js");
 
     installFetchMock(async (url) => {
       if (url.includes("/api/tags")) {
@@ -342,7 +342,7 @@ describe("ollamaGenerator", () => {
   });
 
   test("inner JSON parse failure (response is not JSON) returns null", async () => {
-    const { generateOllama } = await import("../../learn/ollamaGenerator.js");
+    const { generateOllama } = await import("@/core/learn/ollamaGenerator.js");
 
     installFetchMock(async (url) => {
       if (url.includes("/api/tags")) {

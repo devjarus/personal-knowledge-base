@@ -50,7 +50,7 @@ async function writeFile(relPath: string, content: string): Promise<void> {
 
 describe("hashSources", () => {
   test("sorted output is stable regardless of input order", async () => {
-    const { hashSources } = await import("../../learn/sourceHashes.js");
+    const { hashSources } = await import("@/core/learn/sourceHashes.js");
 
     await writeFile("a/n1.md", "content A");
     await writeFile("a/n2.md", "content B");
@@ -64,7 +64,7 @@ describe("hashSources", () => {
   });
 
   test("different file contents produce different hashes", async () => {
-    const { hashSources } = await import("../../learn/sourceHashes.js");
+    const { hashSources } = await import("@/core/learn/sourceHashes.js");
 
     await writeFile("diff/n1.md", "unique content alpha");
     await writeFile("diff/n2.md", "unique content beta");
@@ -76,7 +76,7 @@ describe("hashSources", () => {
   });
 
   test("same contents produce same hashes (deterministic)", async () => {
-    const { hashSources } = await import("../../learn/sourceHashes.js");
+    const { hashSources } = await import("@/core/learn/sourceHashes.js");
 
     await writeFile("det/n1.md", "same content");
     await writeFile("det/n2.md", "same content");
@@ -91,14 +91,14 @@ describe("hashSources", () => {
 
 describe("readExistingSummary", () => {
   test("returns null when _summary.md does not exist", async () => {
-    const { readExistingSummary } = await import("../../learn/sourceHashes.js");
+    const { readExistingSummary } = await import("@/core/learn/sourceHashes.js");
 
     const result = await readExistingSummary(root(), "ideas/absent");
     assert.equal(result, null);
   });
 
   test("returns null for a file without type: cluster-summary", async () => {
-    const { readExistingSummary } = await import("../../learn/sourceHashes.js");
+    const { readExistingSummary } = await import("@/core/learn/sourceHashes.js");
 
     await writeFile(
       "ideas/user/note.md",
@@ -115,7 +115,7 @@ describe("readExistingSummary", () => {
   });
 
   test("parses sourceHashes, generator, model, contentHash from valid summary", async () => {
-    const { readExistingSummary } = await import("../../learn/sourceHashes.js");
+    const { readExistingSummary } = await import("@/core/learn/sourceHashes.js");
 
     const summaryContent = `---
 type: cluster-summary
@@ -156,7 +156,7 @@ pinned: true
   });
 
   test("F2 fix: model is null (not empty string) when field is absent", async () => {
-    const { readExistingSummary } = await import("../../learn/sourceHashes.js");
+    const { readExistingSummary } = await import("@/core/learn/sourceHashes.js");
 
     // Summary without a model field — simulates a hand-crafted or old-format summary.
     const summaryContent = `---
@@ -185,7 +185,7 @@ pinned: true
   });
 
   test("tolerates missing sourceHashes field (returns empty array)", async () => {
-    const { readExistingSummary } = await import("../../learn/sourceHashes.js");
+    const { readExistingSummary } = await import("@/core/learn/sourceHashes.js");
 
     const summaryContent = `---
 type: cluster-summary
@@ -210,7 +210,7 @@ pinned: true
 
 describe("hashBytes", () => {
   test("produces correct SHA-256 of a buffer", async () => {
-    const { hashBytes } = await import("../../learn/sourceHashes.js");
+    const { hashBytes } = await import("@/core/learn/sourceHashes.js");
 
     const content = "hello, world!\n";
     const buf = Buffer.from(content, "utf8");

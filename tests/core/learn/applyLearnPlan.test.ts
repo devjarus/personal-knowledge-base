@@ -35,7 +35,7 @@ after(async () => {
 beforeEach(async () => {
   const sub = await fs.mkdtemp(path.join(tmpDir, "run-"));
   process.env.KB_ROOT = sub;
-  const { _invalidateNotesCache } = await import("../../fs.js");
+  const { _invalidateNotesCache } = await import("@/core/fs.js");
   _invalidateNotesCache();
 });
 
@@ -69,7 +69,7 @@ async function buildSimplePlan(
   notes: string[],
   status: "new" | "stale" | "fresh"
 ) {
-  const { hashSources } = await import("../../learn/sourceHashes.js");
+  const { hashSources } = await import("@/core/learn/sourceHashes.js");
   const sourceHashes = status === "fresh" ? await hashSources(root(), notes) : await hashSources(root(), notes);
   return {
     generatedAt: new Date().toISOString(),
@@ -91,7 +91,7 @@ async function buildSimplePlan(
 
 describe("applyLearnPlan", () => {
   test("new cluster: writes _summary.md and creates ledger", async () => {
-    const { applyLearnPlan } = await import("../../learn.js");
+    const { applyLearnPlan } = await import("@/core/learn.js");
 
     // Create 3 notes.
     await writeNote("ideas/ml/note1.md", { title: "Neural Networks", tags: ["ml", "ai"] });
@@ -121,7 +121,7 @@ describe("applyLearnPlan", () => {
   });
 
   test("fresh cluster: skipped without writing", async () => {
-    const { applyLearnPlan } = await import("../../learn.js");
+    const { applyLearnPlan } = await import("@/core/learn.js");
 
     await writeNote("ideas/fresh/n1.md", { title: "A" });
     await writeNote("ideas/fresh/n2.md", { title: "B" });
@@ -145,8 +145,8 @@ describe("applyLearnPlan", () => {
   });
 
   test("stale overwrite: captures previousContent in ledger", async () => {
-    const { applyLearnPlan, buildLearnPlan } = await import("../../learn.js");
-    const { readLearnLedger } = await import("../../learn/ledger.js");
+    const { applyLearnPlan, buildLearnPlan } = await import("@/core/learn.js");
+    const { readLearnLedger } = await import("@/core/learn/ledger.js");
 
     await writeNote("ideas/stale/n1.md", { title: "Alpha", tags: ["x"] });
     await writeNote("ideas/stale/n2.md", { title: "Beta", tags: ["y"] });
@@ -181,7 +181,7 @@ describe("applyLearnPlan", () => {
     // Check ledger record has previousContent.
     const ledgerRecords = await readLearnLedger(result2.ledgerPath);
     const writeRecord = ledgerRecords.find((r) => r.kind === "learning-write") as
-      | import("../../learn/ledger.js").LearnLedgerWriteRecord
+      | import("@/core/learn/ledger.js").LearnLedgerWriteRecord
       | undefined;
     assert.ok(writeRecord, "should have a learning-write record");
     assert.ok(writeRecord.previousContent !== null, "previousContent should be set for overwrite");
@@ -193,8 +193,8 @@ describe("applyLearnPlan", () => {
   });
 
   test("previousContent is null for new file writes", async () => {
-    const { applyLearnPlan } = await import("../../learn.js");
-    const { readLearnLedger } = await import("../../learn/ledger.js");
+    const { applyLearnPlan } = await import("@/core/learn.js");
+    const { readLearnLedger } = await import("@/core/learn/ledger.js");
 
     await writeNote("ideas/newfile/n1.md", { title: "X" });
     await writeNote("ideas/newfile/n2.md", { title: "Y" });
@@ -209,7 +209,7 @@ describe("applyLearnPlan", () => {
 
     const records = await readLearnLedger(result.ledgerPath);
     const writeRecord = records.find((r) => r.kind === "learning-write") as
-      | import("../../learn/ledger.js").LearnLedgerWriteRecord
+      | import("@/core/learn/ledger.js").LearnLedgerWriteRecord
       | undefined;
     assert.ok(writeRecord);
     assert.equal(writeRecord.previousContent, null, "new file: previousContent should be null");
@@ -217,7 +217,7 @@ describe("applyLearnPlan", () => {
   });
 
   test("conflict without force: skips user-edited summary", async () => {
-    const { applyLearnPlan } = await import("../../learn.js");
+    const { applyLearnPlan } = await import("@/core/learn.js");
 
     await writeNote("ideas/conflict/n1.md", { title: "P" });
     await writeNote("ideas/conflict/n2.md", { title: "Q" });
@@ -254,7 +254,7 @@ describe("applyLearnPlan", () => {
   });
 
   test("conflict with force: overwrites user-edited summary", async () => {
-    const { applyLearnPlan } = await import("../../learn.js");
+    const { applyLearnPlan } = await import("@/core/learn.js");
 
     await writeNote("ideas/forceconflict/n1.md", { title: "A" });
     await writeNote("ideas/forceconflict/n2.md", { title: "B" });
@@ -286,8 +286,8 @@ describe("applyLearnPlan", () => {
   });
 
   test("lock-held rejection: throws LearnError(LOCK_HELD)", async () => {
-    const { applyLearnPlan, LearnError } = await import("../../learn.js");
-    const { learnLockPath } = await import("../../learn/ledger.js");
+    const { applyLearnPlan, LearnError } = await import("@/core/learn.js");
+    const { learnLockPath } = await import("@/core/learn/ledger.js");
 
     await writeNote("ideas/lock/n1.md", { title: "L1" });
     await writeNote("ideas/lock/n2.md", { title: "L2" });
@@ -324,8 +324,8 @@ describe("applyLearnPlan", () => {
   });
 
   test("ledger structure: header, learning-write, commit records in order", async () => {
-    const { applyLearnPlan } = await import("../../learn.js");
-    const { readLearnLedger } = await import("../../learn/ledger.js");
+    const { applyLearnPlan } = await import("@/core/learn.js");
+    const { readLearnLedger } = await import("@/core/learn/ledger.js");
 
     await writeNote("ideas/ledger/n1.md", { title: "T1", tags: ["tag1"] });
     await writeNote("ideas/ledger/n2.md", { title: "T2", tags: ["tag2"] });
@@ -343,13 +343,13 @@ describe("applyLearnPlan", () => {
 
     // First record = header.
     assert.equal(records[0].kind, "header");
-    const header = records[0] as import("../../learn/ledger.js").LearnLedgerHeaderRecord;
+    const header = records[0] as import("@/core/learn/ledger.js").LearnLedgerHeaderRecord;
     assert.ok(header.generatedAt.length > 0);
     assert.equal(header.generator, "kb-learn@0.1.0");
 
     // Middle record = learning-write.
     const writeRecord = records.find((r) => r.kind === "learning-write") as
-      | import("../../learn/ledger.js").LearnLedgerWriteRecord
+      | import("@/core/learn/ledger.js").LearnLedgerWriteRecord
       | undefined;
     assert.ok(writeRecord, "should have a learning-write record");
     assert.ok(writeRecord.path.endsWith("/_summary.md"));
@@ -360,12 +360,12 @@ describe("applyLearnPlan", () => {
     // Last record = commit.
     const lastRecord = records[records.length - 1];
     assert.equal(lastRecord.kind, "commit");
-    const commit = lastRecord as import("../../learn/ledger.js").LearnLedgerCommitRecord;
+    const commit = lastRecord as import("@/core/learn/ledger.js").LearnLedgerCommitRecord;
     assert.equal(commit.written, 1);
   });
 
   test("integration: _summary.md frontmatter has required fields", async () => {
-    const { applyLearnPlan } = await import("../../learn.js");
+    const { applyLearnPlan } = await import("@/core/learn.js");
 
     await writeNote("ideas/fm/n1.md", { title: "Note One", tags: ["alpha"] }, "First note content here.");
     await writeNote("ideas/fm/n2.md", { title: "Note Two", tags: ["beta"] }, "Second note content here.");

@@ -22,10 +22,10 @@ import {
   ollamaDisabledByEnv,
   DEFAULT_OLLAMA_URL,
   DEFAULT_OLLAMA_MODEL,
-} from "../organize/ollamaNaming.js";
-import type { ClusterForNaming } from "../organize/ollamaNaming.js";
+} from "@/core/organize/ollamaNaming.js";
+import type { ClusterForNaming } from "@/core/organize/ollamaNaming.js";
 
-import { nameClusters } from "../organize/llmNaming.js";
+import { nameClusters } from "@/core/organize/llmNaming.js";
 
 // ---------------------------------------------------------------------------
 // Fetch mocking helpers

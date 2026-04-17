@@ -6,15 +6,15 @@
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import type { ClusterInput } from "../organize/cluster.js";
+import type { ClusterInput } from "@/core/organize/cluster.js";
 
 async function getCluster() {
-  const { cluster } = await import("../organize/cluster.js");
+  const { cluster } = await import("@/core/organize/cluster.js");
   return cluster;
 }
 
 async function getDeriveFolderName() {
-  const { deriveFolderName } = await import("../organize/folderName.js");
+  const { deriveFolderName } = await import("@/core/organize/folderName.js");
   return deriveFolderName;
 }
 

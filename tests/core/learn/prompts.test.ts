@@ -13,8 +13,8 @@
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { buildPrompt, generatedSummarySchema } from "../../learn/prompts.js";
-import type { PromptInput } from "../../learn/prompts.js";
+import { buildPrompt, generatedSummarySchema } from "@/core/learn/prompts.js";
+import type { PromptInput } from "@/core/learn/prompts.js";
 
 // ---------------------------------------------------------------------------
 // Tests

@@ -6,11 +6,11 @@
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import type { Frontmatter } from "../types.js";
+import type { Frontmatter } from "@/core/types.js";
 
 // Lazy import so we can test without side effects.
 async function getIsCarvedOut() {
-  const { isCarvedOut } = await import("../organize/carveouts.js");
+  const { isCarvedOut } = await import("@/core/organize/carveouts.js");
   return isCarvedOut;
 }
 

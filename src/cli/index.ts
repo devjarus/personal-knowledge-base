@@ -70,6 +70,12 @@ import {
   LearnError,
 } from "../core/learn";
 import type { LearnPlan, LearnClusterPlan } from "../core/learn";
+import {
+  buildLinkArchivePlan,
+  applyLinkArchivePlan,
+  undoLastLinkArchive,
+} from "../core/linkArchive";
+import type { LinkArchivePlan } from "../core/linkArchive";
 import type { TreeNode } from "../core/types";
 
 // Tiny ANSI helpers — no extra dependency.
@@ -1683,6 +1689,134 @@ program
         handleLearnError(e, jsonMode);
       }
     }
+  );
+
+// ---------------------------------------------------------------------------
+// link-archive — wire imports/workspace/ into the link graph via
+// `## Related from archive` blocks in cluster summaries.
+// ---------------------------------------------------------------------------
+program
+  .command("link-archive")
+  .description(
+    "Add 'Related from archive' links to cluster summaries. " +
+      "Dry-run by default — no changes until --apply. Use --undo to reverse.",
+  )
+  .option("--apply", "write the changes (default is preview only)")
+  .option("--undo", "revert the most recent --apply run")
+  .option("--top <n>", "top-K archive links per summary (default: 5)", "5")
+  .option(
+    "--archive-prefix <prefix>",
+    "candidate pool path prefix (default: imports/workspace/)",
+    "imports/workspace/",
+  )
+  .option("--json", "emit JSON plan / result instead of human-readable output")
+  .action(
+    async (opts: {
+      apply?: boolean;
+      undo?: boolean;
+      top: string;
+      archivePrefix: string;
+      json?: boolean;
+    }) => {
+      const jsonMode = !!opts.json;
+
+      if (opts.undo) {
+        const { reverted, ledgerPath } = await undoLastLinkArchive();
+        if (jsonMode) {
+          process.stdout.write(
+            JSON.stringify({ reverted, ledgerPath }, null, 2) + "\n",
+          );
+          return;
+        }
+        if (reverted === 0) {
+          process.stdout.write("(no link-archive runs to undo)\n");
+          return;
+        }
+        process.stdout.write(
+          `${color("reverted:", c.yellow)} ${reverted} summaries restored from ${ledgerPath}\n`,
+        );
+        return;
+      }
+
+      const topK = Number(opts.top) || 5;
+      if (!Number.isFinite(topK) || topK < 1 || topK > 50) {
+        fail(`invalid --top value: ${opts.top} (expected 1..50)`);
+      }
+
+      const plan: LinkArchivePlan = await buildLinkArchivePlan({
+        topK,
+        archivePrefix: opts.archivePrefix,
+      });
+
+      if (!opts.apply) {
+        // Preview
+        if (jsonMode) {
+          // Trim the large base64 content fields for preview output; full
+          // apply reloads content from disk anyway.
+          const slim = {
+            ...plan,
+            edits: plan.edits.map((e) => ({
+              summaryPath: e.summaryPath,
+              cluster: e.cluster,
+              clusterSize: e.clusterSize,
+              unchanged: e.unchanged,
+              links: e.links,
+            })),
+          };
+          process.stdout.write(JSON.stringify(slim, null, 2) + "\n");
+          return;
+        }
+
+        const changed = plan.edits.filter((e) => !e.unchanged);
+        process.stdout.write(
+          `${color("kb link-archive — preview", c.cyan)} ` +
+            `(${changed.length} summaries would change, ${plan.edits.length - changed.length} unchanged, ${plan.skipped.length} skipped)\n\n`,
+        );
+        for (const edit of changed) {
+          process.stdout.write(
+            `${color(edit.summaryPath, c.blue)}  ${color(`(${edit.links.length} links, cluster size ${edit.clusterSize})`, c.dim)}\n`,
+          );
+          for (const link of edit.links) {
+            process.stdout.write(
+              `  ${color("→", c.dim)} ${link.path}  ${color(`cos=${link.cosine.toFixed(3)}`, c.dim)}\n`,
+            );
+          }
+        }
+        if (plan.skipped.length > 0) {
+          process.stdout.write(`\n${color("skipped:", c.dim)}\n`);
+          for (const s of plan.skipped.slice(0, 10)) {
+            process.stdout.write(`  ${s.summaryPath}  (${s.reason})\n`);
+          }
+          if (plan.skipped.length > 10) {
+            process.stdout.write(
+              `  ... and ${plan.skipped.length - 10} more\n`,
+            );
+          }
+        }
+        process.stdout.write(
+          `\nRe-run with ${color("--apply", c.yellow)} to write.\n`,
+        );
+        return;
+      }
+
+      // Apply
+      try {
+        const result = await applyLinkArchivePlan(plan);
+        if (jsonMode) {
+          process.stdout.write(JSON.stringify(result, null, 2) + "\n");
+          return;
+        }
+        process.stdout.write(
+          `${color("applied:", c.green)} ${result.edits} summaries updated, ${result.skipped} unchanged.\n`,
+        );
+        process.stdout.write(`Ledger: ${result.ledgerPath}\n`);
+        process.stdout.write(`Run ${color("kb link-archive --undo", c.dim)} to reverse.\n`);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (jsonMode) process.stdout.write(JSON.stringify({ error: msg }) + "\n");
+        fail(msg);
+      }
+    },
   );
 
 program.parseAsync(process.argv).catch((e) => {

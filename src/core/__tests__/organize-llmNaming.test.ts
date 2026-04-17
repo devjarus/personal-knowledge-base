@@ -1,10 +1,15 @@
 /**
  * Tests for organize/llmNaming.ts — nameClusters()
  *
- * The local naming model (Xenova/flan-t5-small) may or may not be cached
- * on the test machine. Tests are written to pass either way — we verify
- * slug-safety, deduplication, and correct array shapes regardless of
- * whether the model generates names or TF-IDF takes over.
+ * All tests pass `{ noOllama: true }` so we never probe a real Ollama
+ * instance (even if one is running locally). That leaves Flan-T5 as the
+ * top tier; the Flan-T5 model (Xenova/flan-t5-small) may or may not be
+ * cached on the test machine. Tests verify slug-safety, deduplication,
+ * and array shapes — passing regardless of which tier actually produces
+ * the names.
+ *
+ * See organize-ollamaNaming.test.ts for fetch-mocked tests of the
+ * Ollama-enabled path.
  */
 
 import { test, describe } from "node:test";
@@ -33,7 +38,7 @@ function makeCluster(opts: Partial<ClusterForNaming> = {}): ClusterForNaming {
 
 describe("nameClusters — basic behavior", () => {
   test("returns empty array for empty cluster list", async () => {
-    const result = await nameClusters([], new Set());
+    const result = await nameClusters([], new Set(), { noOllama: true });
     assert.deepEqual(result, []);
   });
 
@@ -43,7 +48,7 @@ describe("nameClusters — basic behavior", () => {
       makeCluster({ topTermsTfIdf: ["memory", "cache"] }),
     ];
 
-    const result = await nameClusters(clusters, new Set());
+    const result = await nameClusters(clusters, new Set(), { noOllama: true });
 
     assert.equal(result.length, clusters.length, "One name per cluster");
     for (const name of result) {
@@ -59,7 +64,7 @@ describe("nameClusters — basic behavior", () => {
       makeCluster({ topTermsTfIdf: ["testing", "patterns"] }),
     ];
 
-    const result = await nameClusters(clusters, new Set());
+    const result = await nameClusters(clusters, new Set(), { noOllama: true });
 
     assert.equal(result.length, 3);
     const unique = new Set(result);
@@ -76,7 +81,7 @@ describe("nameClusters — basic behavior", () => {
     ];
 
     const existingFolders = new Set(["agents", "agents-tools"]);
-    const result = await nameClusters(clusters, existingFolders);
+    const result = await nameClusters(clusters, existingFolders, { noOllama: true });
 
     assert.equal(result.length, 1);
     // The name must NOT be "agents" or "agents-tools" (both are taken).
@@ -95,7 +100,7 @@ describe("nameClusters — basic behavior", () => {
       }),
     ];
 
-    const result = await nameClusters(clusters, new Set());
+    const result = await nameClusters(clusters, new Set(), { noOllama: true });
 
     assert.equal(result.length, 1);
     assert.match(result[0], /^[a-z0-9][a-z0-9-]*$/, "Should be slug-safe");
@@ -106,7 +111,7 @@ describe("nameClusters — basic behavior", () => {
       makeCluster({ topTermsTfIdf: ["C++", "System.IO", "über"] }),
     ];
 
-    const result = await nameClusters(clusters, new Set());
+    const result = await nameClusters(clusters, new Set(), { noOllama: true });
 
     assert.equal(result.length, 1);
     assert.match(result[0], /^[a-z0-9][a-z0-9-]*$/, `"${result[0]}" is not slug-safe`);
@@ -120,7 +125,7 @@ describe("nameClusters — basic behavior", () => {
       }),
     );
 
-    const result = await nameClusters(clusters, new Set());
+    const result = await nameClusters(clusters, new Set(), { noOllama: true });
 
     assert.equal(result.length, 15);
     const unique = new Set(result);

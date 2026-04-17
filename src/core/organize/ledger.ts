@@ -14,11 +14,21 @@
  * ledger is still readable line-by-line).
  *
  * Reader: parses line-by-line, tolerates trailing newline and blank lines.
+ *
+ * Phase 2 (learnings pipeline): lock + hash helpers are now in src/core/ledger.ts.
+ * The kbRoot-based wrappers below delegate to those shared helpers so that
+ * organize's call sites remain unchanged (they pass kbRoot, not lockPath).
  */
 
 import fs from "node:fs/promises";
 import path from "node:path";
-import crypto from "node:crypto";
+
+// Re-export shared isLockHeld for cross-feature R-6 guard.
+export { isLockHeld, hashFile } from "../ledger";
+import {
+  acquireLock as sharedAcquireLock,
+  releaseLock as sharedReleaseLock,
+} from "../ledger";
 
 // ---------------------------------------------------------------------------
 // Record types
@@ -82,19 +92,6 @@ export function newLedgerPath(kbRoot: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Content hashing
-// ---------------------------------------------------------------------------
-
-/**
- * SHA-256 hex hash of a file's raw bytes.
- * Used to detect user edits between dry-run and apply (spec edge case #7).
- */
-export async function hashFile(absPath: string): Promise<string> {
-  const buf = await fs.readFile(absPath);
-  return crypto.createHash("sha256").update(buf).digest("hex");
-}
-
-// ---------------------------------------------------------------------------
 // Writer
 // ---------------------------------------------------------------------------
 
@@ -144,7 +141,12 @@ export async function readLedger(ledgerPath: string): Promise<LedgerRecord[]> {
 }
 
 // ---------------------------------------------------------------------------
-// Lockfile
+// Lockfile — kbRoot-based wrappers (backward compat)
+//
+// organize.ts calls acquireLock(root) / releaseLock(root) where root is the
+// KB root path. These wrappers compute the full lock path then delegate to
+// the shared helpers in src/core/ledger.ts (which accept a full lockPath).
+// LOAD-BEARING: do NOT change the signature here — organize.ts imports these.
 // ---------------------------------------------------------------------------
 
 /** Absolute path to the organize lock file. */
@@ -154,61 +156,19 @@ export function lockPath(kbRoot: string): string {
 
 /**
  * Acquire the organize lock.
- *
- * 1. Check if .lock exists.
- * 2. If yes, read the PID. If the process is running (kill -0), throw — organize is in progress.
- *    If ESRCH (no such process), the lock is stale — remove it.
- * 3. Write the current PID to .lock.
- *
- * LOAD-BEARING: concurrent-safety is O(process, not thread) — this is sufficient
- * because Node is single-threaded and organize is a CLI tool (one process per terminal).
- * For true atomic cross-process mutual exclusion, use O_EXCL open; we accept a small
- * TOCTOU window as it's documented and rare enough in practice.
- *
- * @throws Error "organize in progress (PID X)" if another live process holds the lock.
+ * Delegates to the shared acquireLock(lockPath) in src/core/ledger.ts.
+ * LOAD-BEARING: error message must contain "organize in progress (PID X)" —
+ * existing tests and CLI error paths match against this phrase.
+ * @throws Error if another live process holds the lock.
  */
 export async function acquireLock(kbRoot: string): Promise<void> {
-  const lp = lockPath(kbRoot);
-  await fs.mkdir(path.dirname(lp), { recursive: true });
-
-  // Check for an existing lock.
-  let existingPid: number | null = null;
   try {
-    const content = await fs.readFile(lp, "utf8");
-    existingPid = parseInt(content.trim(), 10);
+    await sharedAcquireLock(lockPath(kbRoot));
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
-    // No lock file — proceed to acquire.
+    // Re-throw with organize-specific wording so CLI / tests match "organize in progress".
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(`organize in progress — ${msg}`);
   }
-
-  if (existingPid !== null && !Number.isNaN(existingPid)) {
-    // Check if the process is still running.
-    let processAlive = false;
-    try {
-      process.kill(existingPid, 0); // signal 0 = existence check only
-      processAlive = true;
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === "ESRCH") {
-        // No such process — stale lock, remove it and proceed.
-        processAlive = false;
-      } else if ((err as NodeJS.ErrnoException).code === "EPERM") {
-        // Process exists but we can't signal it (different user) — treat as alive.
-        processAlive = true;
-      } else {
-        throw err;
-      }
-    }
-
-    if (processAlive) {
-      throw new Error(`organize in progress (PID ${existingPid})`);
-    }
-
-    // Stale lock — remove it.
-    await fs.rm(lp, { force: true });
-  }
-
-  // Write our PID.
-  await fs.writeFile(lp, String(process.pid), "utf8");
 }
 
 /**
@@ -216,8 +176,7 @@ export async function acquireLock(kbRoot: string): Promise<void> {
  * Safe to call even if the lock file is already gone.
  */
 export async function releaseLock(kbRoot: string): Promise<void> {
-  const lp = lockPath(kbRoot);
-  await fs.rm(lp, { force: true });
+  await sharedReleaseLock(lockPath(kbRoot));
 }
 
 // ---------------------------------------------------------------------------

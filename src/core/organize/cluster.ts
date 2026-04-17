@@ -40,7 +40,7 @@
  * No filesystem I/O. Pure function over Float32Array vectors.
  */
 
-import { deriveFolderName } from "./folderName.js";
+import { deriveFolderName } from "./folderName";
 
 // ---------------------------------------------------------------------------
 // Public types

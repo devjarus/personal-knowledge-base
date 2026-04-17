@@ -6,8 +6,8 @@
  * MCP-compatible agent (Claude Desktop, Claude Code, Cursor, etc.) can read
  * and write notes the same way the web UI and CLI do.
  */
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio";
 import { z } from "zod";
 
 import {
@@ -16,9 +16,9 @@ import {
   writeNote,
   deleteNote,
   buildTree,
-} from "../core/fs.js";
-import { searchNotes } from "../core/search.js";
-import { sync } from "../core/sync.js";
+} from "../core/fs";
+import { searchNotes } from "../core/search";
+import { sync } from "../core/sync";
 
 const server = new McpServer(
   {

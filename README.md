@@ -150,6 +150,10 @@ pnpm kb search <query>                    # full-text search
 pnpm kb tree                              # print directory tree
 pnpm kb sync [--push|--pull] [--mirror] [--dry-run]
 pnpm kb import <source> [--from <date>] [--to <date>] [--no-overwrite] [--dry-run] [-y]
+pnpm kb organize [--apply|--undo] [--no-llm] [--json]
+                                          # cluster notes into topical folders (Ollama → TF-IDF)
+pnpm kb learn [--apply|--undo] [--no-llm] [--json]
+                                          # generate per-folder _summary.md (Ollama → extractive)
 pnpm kb mcp                               # start MCP server
 ```
 

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { FolderInput, FolderTree, Settings } from "lucide-react";
+import { FolderInput, FolderTree, Settings, Wand2 } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -58,6 +58,18 @@ export function AppSidebar() {
                   <Link href="/import" className="gap-2">
                     <FolderInput className="h-4 w-4 shrink-0 text-muted-foreground" />
                     <span>Import</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  tooltip="Organize notes into folders"
+                  isActive={pathname === "/organize"}
+                >
+                  <Link href="/organize" className="gap-2">
+                    <Wand2 className="h-4 w-4 shrink-0 text-muted-foreground" />
+                    <span>Organize</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>

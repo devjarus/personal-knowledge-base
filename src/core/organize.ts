@@ -11,20 +11,19 @@
 import path from "node:path";
 import fs from "node:fs/promises";
 
-import { kbRoot } from "./paths.js";
-import { listNotes, _invalidateNotesCache } from "./fs.js";
-import { loadIndex, _renameSidecarPath } from "./semanticIndex.js";
-import type { IndexRow } from "./semanticIndex.js";
-import { isCarvedOut } from "./organize/carveouts.js";
-import { classifyByFrontmatter } from "./organize/classifier.js";
-import { cluster } from "./organize/cluster.js";
-import type { ClusterInput } from "./organize/cluster.js";
-import { nameClusters } from "./organize/llmNaming.js";
-import type { ClusterForNaming } from "./organize/llmNaming.js";
-import { deriveFolderName } from "./organize/folderName.js";
-import type { NoteSummary } from "./types.js";
-import { readNote } from "./fs.js";
-import { moveNote } from "./organize/move.js";
+import { kbRoot } from "./paths";
+import { listNotes, _invalidateNotesCache } from "./fs";
+import { loadIndex, _renameSidecarPath } from "./semanticIndex";
+import type { IndexRow } from "./semanticIndex";
+import { isCarvedOut } from "./organize/carveouts";
+import { classifyByFrontmatter } from "./organize/classifier";
+import { cluster } from "./organize/cluster";
+import type { ClusterInput } from "./organize/cluster";
+import { nameClusters } from "./organize/llmNaming";
+import type { ClusterForNaming } from "./organize/llmNaming";
+import type { NoteSummary } from "./types";
+import { readNote } from "./fs";
+import { moveNote } from "./organize/move";
 import {
   newLedgerPath,
   appendRecord,
@@ -34,9 +33,9 @@ import {
   releaseLock,
   findLatestLedger,
   ledgerDir,
-} from "./organize/ledger.js";
-import type { LedgerMoveRecord, LedgerRewriteRecord } from "./organize/ledger.js";
-import { computeLinkRewrites, applyLinkRewrites, undoLinkRewrites } from "./organize/rewriteLinks.js";
+} from "./organize/ledger";
+import type { LedgerMoveRecord, LedgerRewriteRecord } from "./organize/ledger";
+import { computeLinkRewrites, applyLinkRewrites, undoLinkRewrites } from "./organize/rewriteLinks";
 
 // ---------------------------------------------------------------------------
 // Public types — locked cross-phase contract
@@ -83,7 +82,14 @@ export interface BuildPlanOptions {
   minClusters?: number;           // default: Math.max(8, ceil(N/25)) for N>50
   driftMargin?: number;           // default 0.05 (incremental only)
   rewriteLinks?: boolean;         // default true (Phase 3 implements this)
-  noLlm?: boolean;                // if true, skip LLM naming and use TF-IDF
+  /** Skip ALL LLM tiers — use TF-IDF naming only. Wins over `noOllama`. */
+  noLlm?: boolean;
+  /** Skip the Ollama tier; fall through to Flan-T5 → TF-IDF. */
+  noOllama?: boolean;
+  /** Override Ollama model tag (else $KB_ORGANIZE_MODEL or llama3.2:3b). */
+  ollamaModel?: string;
+  /** Override Ollama base URL (else $KB_ORGANIZE_OLLAMA_URL or localhost:11434). */
+  ollamaUrl?: string;
 }
 
 export interface ApplyResult {
@@ -176,6 +182,9 @@ export async function buildOrganizePlan(opts: BuildPlanOptions): Promise<Organiz
   const maxClusters = opts.maxClusters ?? 20;
   const extraGlobs = opts.exclude ?? [];
   const noLlm = opts.noLlm ?? false;
+  const noOllama = opts.noOllama ?? false;
+  const ollamaModel = opts.ollamaModel;
+  const ollamaUrl = opts.ollamaUrl;
 
   // ---------------------------------------------------------------------------
   // Validate .kb-index existence. Fail fast with a useful error message.
@@ -403,23 +412,15 @@ export async function buildOrganizePlan(opts: BuildPlanOptions): Promise<Organiz
       };
     });
 
-    // Name all clusters — local model if available, TF-IDF otherwise.
-    // noLlm: true forces TF-IDF naming (skips the local generation model).
-    let folderNames: string[];
-    if (noLlm) {
-      // Force TF-IDF path: use deriveFolderName directly (no model load).
-      const used = new Set<string>(existingFolders);
-      folderNames = clustersForNaming.map((c) => {
-        const name = deriveFolderName(
-          c.topTermsTfIdf.length > 0 ? c.topTermsTfIdf : ["cluster"],
-          used,
-        );
-        used.add(name);
-        return name;
-      });
-    } else {
-      folderNames = await nameClusters(clustersForNaming, existingFolders);
-    }
+    // Name all clusters via the Ollama → Flan-T5 → TF-IDF fallback chain.
+    // nameClusters handles tier selection internally; it never throws and
+    // always returns clusters.length unique slug-safe names.
+    const folderNames = await nameClusters(clustersForNaming, existingFolders, {
+      noLlm,
+      noOllama,
+      ollamaModel,
+      ollamaUrl,
+    });
 
     // Register cluster folder assignments using the (possibly LLM) names.
     for (let ci = 0; ci < clusterOut.clusters.length; ci++) {

@@ -36,7 +36,7 @@ function trashTimestamp(): string {
   return new Date().toISOString().replace(/[:.]/g, "-");
 }
 
-async function moveToTrash(absSource: string, relPath: string): Promise<void> {
+export async function moveToTrash(absSource: string, relPath: string): Promise<void> {
   const root = kbRoot();
   const trashRoot = path.join(root, TRASH_DIR, trashTimestamp());
   const trashTarget = path.join(trashRoot, relPath);

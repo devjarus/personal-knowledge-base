@@ -32,9 +32,9 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 
-import type { OrganizeMove, LinkRewrite } from "../organize.js";
-import type { LedgerRewriteRecord } from "./ledger.js";
-import { appendRecord } from "./ledger.js";
+import type { OrganizeMove, LinkRewrite } from "../organize";
+import type { LedgerRewriteRecord } from "./ledger";
+import { appendRecord } from "./ledger";
 
 // ---------------------------------------------------------------------------
 // Regex patterns (mirrors links.ts — same patterns, not re-implemented)

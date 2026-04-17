@@ -12,7 +12,7 @@
  * Extra globs are matched using a minimal built-in glob matcher (no new deps).
  */
 
-import type { Frontmatter } from "../types.js";
+import type { Frontmatter } from "../types";
 
 // ---------------------------------------------------------------------------
 // Baked-in folder prefixes that are always excluded.

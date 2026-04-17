@@ -10,7 +10,7 @@
  * embedding-cluster classification.
  */
 
-import type { NoteSummary } from "../types.js";
+import type { NoteSummary } from "../types";
 
 export interface ClassifyResult {
   folder: string;

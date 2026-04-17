@@ -17,21 +17,28 @@ import {
   writeNote,
   deleteNote,
   buildTree,
-} from "../core/fs.js";
-import { searchNotes } from "../core/search.js";
-import { sync } from "../core/sync.js";
-import { importNotes } from "../core/import.js";
-import { kbStats } from "../core/stats.js";
-import { buildLinkIndex } from "../core/links.js";
-import { rebuildIndex, refreshIndex } from "../core/semanticIndex.js";
+} from "../core/fs";
+import { searchNotes } from "../core/search";
+import { sync } from "../core/sync";
+import { importNotes } from "../core/import";
+import { kbStats } from "../core/stats";
+import { buildLinkIndex } from "../core/links";
+import { rebuildIndex, refreshIndex } from "../core/semanticIndex";
 import {
   buildOrganizePlan,
   applyOrganizePlan,
   undoLastOrganize,
   OrganizeError,
-} from "../core/organize.js";
-import type { OrganizePlan, OrganizeMove } from "../core/organize.js";
-import type { TreeNode } from "../core/types.js";
+} from "../core/organize";
+import type { OrganizePlan, OrganizeMove } from "../core/organize";
+import {
+  buildLearnPlan,
+  applyLearnPlan,
+  undoLastLearn,
+  LearnError,
+} from "../core/learn";
+import type { LearnPlan, LearnClusterPlan } from "../core/learn";
+import type { TreeNode } from "../core/types";
 
 // Tiny ANSI helpers — no extra dependency.
 const c = {
@@ -1031,7 +1038,16 @@ program
   .option("--min-confidence <n>", "cluster-confidence threshold (default 0.35)")
   .option("--max-clusters <n>", "upper bound on cluster count (default auto)")
   .option("--keep-empty-dirs", "don't sweep empty parent dirs after moves")
-  .option("--no-llm", "use TF-IDF naming instead of local model naming")
+  .option("--no-llm", "skip all LLM tiers (TF-IDF naming only)")
+  .option("--no-ollama", "skip the Ollama tier (use Flan-T5 + TF-IDF only)")
+  .option(
+    "--model <name>",
+    "Ollama model tag to use (default: $KB_ORGANIZE_MODEL or llama3.2:3b)"
+  )
+  .option(
+    "--ollama-url <url>",
+    "Ollama base URL (default: $KB_ORGANIZE_OLLAMA_URL or http://localhost:11434)"
+  )
   .action(
     async (opts: {
       apply?: boolean;
@@ -1044,9 +1060,15 @@ program
       maxClusters?: string;
       keepEmptyDirs?: boolean;
       llm?: boolean; // commander sets false when --no-llm is used
+      ollama?: boolean; // commander sets false when --no-ollama is used
+      model?: string;
+      ollamaUrl?: string;
     }) => {
       const jsonMode = opts.json === true;
       const noLlm = opts.llm === false; // commander: --no-llm sets opts.llm = false
+      const noOllama = opts.ollama === false; // commander: --no-ollama sets opts.ollama = false
+      const ollamaModel = opts.model;
+      const ollamaUrl = opts.ollamaUrl;
       const minConf =
         opts.minConfidence !== undefined ? Number(opts.minConfidence) : undefined;
       const maxClusters =
@@ -1107,6 +1129,9 @@ program
           // commander sets opts.rewriteLinks = false when --no-rewrite-links is passed
           rewriteLinks: opts.rewriteLinks !== false,
           noLlm,
+          noOllama,
+          ollamaModel,
+          ollamaUrl,
         });
       } catch (e) {
         // Map OrganizeError codes to user-friendly messages (spec §6).
@@ -1186,6 +1211,359 @@ program
           process.exit(1);
         }
         handleOrganizeError(e, jsonMode);
+      }
+    }
+  );
+
+// ---------------------------------------------------------------------------
+// kb learn — generate per-cluster summary notes from the learnings pipeline.
+//
+// Dry-run by default (no flags → print plan, exit 0).
+// Filesystem is NEVER mutated without --apply.
+// ---------------------------------------------------------------------------
+
+/** Collect repeatable --cluster flags into an array. */
+function collectCluster(val: string, acc: string[]): string[] {
+  acc.push(val);
+  return acc;
+}
+
+// ---------------------------------------------------------------------------
+// Pretty TTY output helpers for learn
+// ---------------------------------------------------------------------------
+
+/** Status badge string for a cluster. */
+function learnStatusBadge(status: LearnClusterPlan["status"]): string {
+  switch (status) {
+    case "new":     return color("[new]", c.green);
+    case "stale":   return color("[stale]", c.yellow);
+    case "fresh":   return color("[fresh]", c.dim);
+    case "skipped": return color("[skip]", c.dim);
+  }
+}
+
+/** Generator badge string for a cluster. */
+function learnGeneratorBadge(generator: LearnClusterPlan["generator"]): string {
+  return generator === "ollama"
+    ? color("ollama", c.magenta)
+    : color("extractive", c.cyan);
+}
+
+/** Print the dry-run / plan TTY output for learn. */
+function printLearnPlan(plan: LearnPlan): void {
+  // Header
+  process.stdout.write(
+    `${color("kb learn", c.bold)} ${color("—", c.dim)} ${color("dry-run", c.yellow)}\n`
+  );
+
+  // Stats summary
+  const { stats } = plan;
+  process.stdout.write(
+    `${color("Clusters:", c.bold)} ` +
+    `total=${color(String(stats.total), c.bold)}  ` +
+    `new=${color(String(stats.new), c.green)}  ` +
+    `stale=${color(String(stats.stale), c.yellow)}  ` +
+    `fresh=${color(String(stats.fresh), c.dim)}  ` +
+    `skipped=${color(String(stats.skipped), c.dim)}\n`
+  );
+
+  // Top-level generator
+  process.stdout.write(
+    `${color("Generator:", c.dim)} ${learnGeneratorBadge(plan.generator)}\n`
+  );
+
+  // Surface Ollama error if present
+  if (plan.ollamaError) {
+    process.stdout.write(
+      `${color("Ollama:", c.yellow)} ${color(plan.ollamaError, c.dim)}\n`
+    );
+  }
+
+  process.stdout.write("\n");
+
+  // Per-cluster table (skip fresh clusters unless all are fresh)
+  const activeClusters = plan.clusters.filter(
+    (c) => c.status !== "fresh" && c.status !== "skipped"
+  );
+  const freshClusters = plan.clusters.filter((c) => c.status === "fresh");
+  const skippedClusters = plan.clusters.filter((c) => c.status === "skipped");
+
+  if (activeClusters.length > 0) {
+    process.stdout.write(`${color("Pending:", c.bold)}\n`);
+    for (const cl of activeClusters) {
+      process.stdout.write(
+        `  ${learnStatusBadge(cl.status)} ` +
+        `${color(cl.cluster, c.blue)}  ` +
+        `${color(`${cl.sources.length} notes`, c.dim)}  ` +
+        `${learnGeneratorBadge(cl.generator)}\n`
+      );
+    }
+    process.stdout.write("\n");
+  }
+
+  if (freshClusters.length > 0) {
+    process.stdout.write(
+      `${color(`Fresh (up-to-date, no writes needed): ${freshClusters.length}`, c.dim)}\n\n`
+    );
+  }
+
+  if (skippedClusters.length > 0) {
+    process.stdout.write(`${color("Skipped:", c.dim)}\n`);
+    for (const cl of skippedClusters) {
+      process.stdout.write(
+        `  ${learnStatusBadge(cl.status)} ` +
+        `${color(cl.cluster, c.dim)}  ` +
+        `${color(cl.skipReason ?? "below minNotes threshold", c.dim)}\n`
+      );
+    }
+    process.stdout.write("\n");
+  }
+
+  if (plan.clusters.length === 0) {
+    process.stdout.write(
+      `${color("(no eligible clusters found — add notes or lower --min-notes)", c.dim)}\n\n`
+    );
+  }
+
+  // Footer
+  process.stdout.write(
+    `${color("Run with", c.dim)} ${color("--apply", c.yellow)} ` +
+    `${color("to write summaries, or", c.dim)} ${color("--json", c.yellow)} ` +
+    `${color("for machine-readable output.", c.dim)}\n`
+  );
+}
+
+/** Handle LearnError and unexpected errors uniformly. */
+function handleLearnError(e: unknown, jsonMode: boolean): never {
+  const msg = e instanceof Error ? e.message : String(e);
+  const isKnown = e instanceof LearnError;
+  const showStack = process.env.KB_DEBUG === "1";
+
+  if (jsonMode) {
+    process.stderr.write(`${color("error:", c.red)} ${msg}\n`);
+    process.stdout.write(JSON.stringify({ error: msg }) + "\n");
+  } else {
+    process.stderr.write(`${color("error:", c.red)} ${msg}\n`);
+    if (!isKnown && showStack && e instanceof Error && e.stack) {
+      process.stderr.write(e.stack + "\n");
+    }
+  }
+  process.exit(1);
+}
+
+program
+  .command("learn")
+  .description(
+    "Generate per-cluster summary notes (_summary.md). Dry-run by default — no changes until --apply."
+  )
+  // Execution mode flags (mutually exclusive in practice; --undo wins if both supplied)
+  .option("--apply", "execute the plan: write/overwrite _summary.md files")
+  .option("--undo", "reverse the most recent applied learn run")
+  // Output flags
+  .option("--json", "emit plan/result as JSON (no ANSI, no prompts)")
+  // Generator tuning flags (mirror organize's --no-llm / --no-ollama / --model / --ollama-url)
+  .option("--no-llm", "force extractive tier — skip Ollama entirely")
+  .option("--no-ollama", "skip the Ollama tier (alias for --no-llm in v1)")
+  .option(
+    "--model <name>",
+    "Ollama model tag to use (default: $KB_LEARN_MODEL or llama3.2)"
+  )
+  .option(
+    "--ollama-url <url>",
+    "Ollama base URL (default: $KB_LEARN_OLLAMA_URL or http://localhost:11434)"
+  )
+  .option("--force", "regenerate even if sourceHashes match (overrides idempotency skip)")
+  .option(
+    "--cluster <path>",
+    "scope run to a single cluster folder (repeatable)",
+    collectCluster,
+    [] as string[]
+  )
+  .option(
+    "--min-notes <n>",
+    `cluster threshold — minimum notes per folder (default: $KB_LEARN_MIN_NOTES or 3)`
+  )
+  .action(
+    async (opts: {
+      apply?: boolean;
+      undo?: boolean;
+      json?: boolean;
+      llm?: boolean;       // commander sets false when --no-llm is used
+      ollama?: boolean;    // commander sets false when --no-ollama is used
+      model?: string;
+      ollamaUrl?: string;
+      force?: boolean;
+      cluster?: string[];
+      minNotes?: string;
+    }) => {
+      const jsonMode = opts.json === true;
+      // commander: --no-llm sets opts.llm = false; --no-ollama sets opts.ollama = false
+      const noLlm =
+        opts.llm === false ||
+        opts.ollama === false ||
+        process.env.KB_LEARN_NO_OLLAMA === "1";
+      const ollamaModel =
+        opts.model ?? process.env.KB_LEARN_MODEL;
+      const ollamaUrl =
+        opts.ollamaUrl ?? process.env.KB_LEARN_OLLAMA_URL;
+      const force = opts.force ?? false;
+      const scopedClusters =
+        opts.cluster && opts.cluster.length > 0 ? opts.cluster : undefined;
+
+      // Resolve minNotes (flag > env > default 3)
+      let minNotes: number | undefined;
+      if (opts.minNotes !== undefined) {
+        const parsed = parseInt(opts.minNotes, 10);
+        if (Number.isNaN(parsed) || parsed < 1) {
+          process.stderr.write(`error: --min-notes must be a positive integer\n`);
+          process.exit(1);
+        }
+        minNotes = parsed;
+      } else if (process.env.KB_LEARN_MIN_NOTES) {
+        const parsed = parseInt(process.env.KB_LEARN_MIN_NOTES, 10);
+        if (!Number.isNaN(parsed) && parsed > 0) minNotes = parsed;
+      }
+
+      // --- UNDO mode ---
+      if (opts.undo) {
+        if (!jsonMode) {
+          process.stdout.write(
+            `${color("kb learn", c.bold)} ${color("—", c.dim)} ${color("undoing", c.yellow)}\n`
+          );
+        }
+        try {
+          const result = await undoLastLearn();
+
+          if (jsonMode) {
+            process.stdout.write(JSON.stringify(result, null, 2) + "\n");
+          } else {
+            process.stdout.write(
+              `${color("Reverted", c.green)} ${result.restored} summaries` +
+              ` (${result.conflicts.length} conflicts).` +
+              ` Ledger: ${color(result.ledgerPath, c.dim)}\n`
+            );
+            if (result.conflicts.length > 0) {
+              process.stdout.write(
+                `${color(`Conflicts (${result.conflicts.length}):`, c.yellow)}\n`
+              );
+              for (const conflict of result.conflicts) {
+                process.stdout.write(
+                  `  ${color(conflict.path, c.dim)} — ${conflict.reason}\n`
+                );
+              }
+            }
+          }
+          return;
+        } catch (e) {
+          if (e instanceof LearnError) {
+            if (e.code === "NO_LEDGER") {
+              const msg = "no learn ledger found — run 'kb learn --apply' first";
+              if (jsonMode) process.stdout.write(JSON.stringify({ error: msg }) + "\n");
+              process.stderr.write(`${color("error:", c.red)} ${msg}\n`);
+              process.exit(1);
+            }
+            if (e.code === "LOCK_HELD") {
+              const msg = `another learn is in progress. If stuck, remove .kb-index/learn/.lock`;
+              if (jsonMode) process.stdout.write(JSON.stringify({ error: msg }) + "\n");
+              process.stderr.write(`${color("error:", c.red)} ${msg}\n`);
+              process.exit(1);
+            }
+          }
+          handleLearnError(e, jsonMode);
+        }
+      }
+
+      // --- DRY-RUN or APPLY: build the plan first ---
+      let plan: LearnPlan;
+      try {
+        plan = await buildLearnPlan({
+          clusters: scopedClusters,
+          minNotes,
+          noLlm,
+          noOllama: noLlm,
+          ollamaModel,
+          ollamaUrl,
+          force,
+        });
+      } catch (e) {
+        if (e instanceof LearnError) {
+          if (e.code === "LOCK_HELD") {
+            const msg = `another learn is in progress. If stuck, remove .kb-index/learn/.lock`;
+            if (jsonMode) process.stdout.write(JSON.stringify({ error: msg }) + "\n");
+            process.stderr.write(`${color("error:", c.red)} ${msg}\n`);
+            process.exit(1);
+          }
+        }
+        handleLearnError(e, jsonMode);
+      }
+
+      // --- DRY-RUN (no --apply) ---
+      if (!opts.apply) {
+        if (jsonMode) {
+          process.stdout.write(JSON.stringify(plan, null, 2) + "\n");
+        } else {
+          printLearnPlan(plan);
+        }
+        return;
+      }
+
+      // --- APPLY mode ---
+      if (!jsonMode) {
+        const actionable = plan.clusters.filter(
+          (c) => c.status === "new" || c.status === "stale"
+        ).length;
+        process.stdout.write(
+          `${color("kb learn", c.bold)} ${color("—", c.dim)} ${color("applying", c.yellow)}\n`
+        );
+        process.stdout.write(
+          `${color("Planning:", c.dim)} ${actionable} summaries to write...\n`
+        );
+      }
+
+      try {
+        const result = await applyLearnPlan(plan, {
+          force,
+          noLlm,
+          noOllama: noLlm,
+          ollamaModel,
+          ollamaUrl,
+        });
+
+        if (jsonMode) {
+          process.stdout.write(JSON.stringify(result, null, 2) + "\n");
+        } else {
+          process.stdout.write(
+            `${color("Wrote", c.green)} ${result.applied.length} summaries` +
+            ` (${color(String(result.skipped.length), c.dim)} skipped,` +
+            ` ${color("0", c.dim)} conflicts).` +
+            ` Ledger: ${color(result.ledgerPath, c.dim)}\n`
+          );
+
+          if (result.ollamaError) {
+            process.stdout.write(
+              `${color("Ollama:", c.yellow)} ${color(result.ollamaError, c.dim)}\n`
+            );
+          }
+
+          if (result.skipped.length > 0) {
+            process.stdout.write(
+              `${color(`Skipped: ${result.skipped.length}`, c.yellow)}\n`
+            );
+            for (const s of result.skipped) {
+              process.stdout.write(
+                `  ${color(s.cluster, c.dim)} — ${s.reason}\n`
+              );
+            }
+          }
+        }
+      } catch (e) {
+        if (e instanceof LearnError && e.code === "LOCK_HELD") {
+          const msg = `another learn is in progress. If stuck, remove .kb-index/learn/.lock`;
+          if (jsonMode) process.stdout.write(JSON.stringify({ error: msg }) + "\n");
+          process.stderr.write(`${color("error:", c.red)} ${msg}\n`);
+          process.exit(1);
+        }
+        handleLearnError(e, jsonMode);
       }
     }
   );

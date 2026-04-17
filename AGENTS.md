@@ -101,22 +101,160 @@ files survive every delete; only the visible KB tree changes.
 - `deleteFolder` refuses to operate on `.trash` itself — no deleting the bin
   via the API. Same for `.kb-index`.
 
+### Learnings pipeline: `kb learn`
+
+Generates per-cluster `_summary.md` files that synthesize the notes in each
+topical folder. Uses a two-tier generator chain:
+
+1. **Ollama** (if running at the configured URL with a usable model) — produces
+   the richest summaries. Zero setup if you already run Ollama.
+2. **Extractive** (centroid-rank + tag-frequency, fully local, no download) —
+   always available as a deterministic fallback.
+
+**No API key needed.** Ollama probe uses a 500ms timeout; when Ollama is absent
+the extractive tier kicks in silently.
+
+- `kb learn` — dry-run: prints a plan table (cluster, notes, status, tier); no writes
+- `kb learn --apply` — write/overwrite `_summary.md` in every eligible cluster
+- `kb learn --undo` — reverse the most recent applied learn run
+- `kb learn --json` — machine-readable plan (or apply/undo result) on stdout
+- `kb learn --force` — regenerate even if `sourceHashes` are unchanged (overrides idempotency)
+- `kb learn --no-llm` — force extractive tier; skip Ollama entirely
+- `kb learn --no-ollama` — alias for `--no-llm` in v1
+- `kb learn --model <name>` — override Ollama model tag (default `llama3.2`,
+  prefix-matches any installed `llama3.2:*` variant)
+- `kb learn --ollama-url <url>` — override Ollama base URL
+- `kb learn --min-notes <n>` — minimum source notes a folder must have to be
+  eligible (default `3`)
+- `kb learn --cluster <path>` — scope run to a single cluster folder (repeatable)
+
+Ollama config also honours env vars (CLI flags win when both are set):
+
+- `KB_LEARN_MODEL` — model tag (default `llama3.2`)
+- `KB_LEARN_OLLAMA_URL` — base URL (default `http://localhost:11434`)
+- `KB_LEARN_NO_OLLAMA=1` — skip Ollama entirely
+- `KB_LEARN_MIN_NOTES` — cluster eligibility floor (default `3`)
+
+**Idempotency.** Each `_summary.md` carries a `sourceHashes` frontmatter field
+(sorted SHA-256 of each source note's raw bytes). On re-run, if the hashes
+match and the generator tier is unchanged, the cluster is marked `"fresh"` and
+skipped. Use `--force` to override.
+
+**User-edit protection (R-5).** Before overwriting an existing `_summary.md`,
+`applyLearnPlan` computes its current SHA-256 and compares it with the hash
+recorded by the previous run's ledger. A mismatch means you edited the file;
+the cluster is skipped with reason `"user edited"` unless `--force` is set.
+
+**Cross-feature lock coordination (R-6).** `applyLearnPlan` checks whether the
+organize lock is held before acquiring its own lock. When both are taken
+simultaneously (race) it logs a warning and proceeds — TOCTOU is acknowledged;
+this is a best-effort guard.
+
+**Carve-out safe.** Generated `_summary.md` files carry `organize: false` and
+`pinned: true` in their frontmatter so future `kb organize` runs never move
+them. The leading underscore in `_summary.md` also keeps them out of organize
+cluster membership scans.
+
+**Atomic writes.** Summaries are written to a sibling `.tmp` file (same
+filesystem as the destination) and renamed into place — eliminates EXDEV
+cross-device errors on Linux tmpfs mounts.
+
+**Known limitation (R-4 ordering).** Running `kb organize --apply` AFTER
+`kb learn --apply` may move cluster folders, invalidating the
+`cluster`/`summaryPath` recorded in the learn ledger. Re-run `kb learn --apply`
+after any organize pass that moves folders.
+
+**Summary file shape.** Each `_summary.md` starts with YAML frontmatter:
+
+```yaml
+---
+type: cluster-summary
+generator: kb-learn@0.1.0
+cluster: <KB-relative folder path>
+generatedAt: "2026-04-17T12:00:00.000Z"
+sourceCount: 5
+sourceHashes: [sha256hex, ...]
+model: "llama3.2:3b"          # or null for extractive
+sources: [path/to/note.md, ...]
+organize: false
+pinned: true
+---
+```
+
+Followed by a markdown body with `## Themes`, `## Key points`,
+`## Open questions`, and `## Sources` sections.
+
+**Ledger.** Apply writes a JSONL ledger at
+`.kb-index/learn/<ISO-timestamp>.jsonl` with three record types:
+`{kind:"header"}`, `{kind:"learning-write", ..., previousContent: <base64>}`,
+and `{kind:"commit"}`. `previousContent` is base64-encoded raw bytes of any
+overwritten file, enabling byte-for-byte restoration on undo. New files have
+`previousContent: null` — undo sends them to `.trash/` instead. The ledger is
+renamed to `*.undone.jsonl` after a successful undo.
+
+**Lock.** `.kb-index/learn/.lock` (uses shared `acquireLock`/`releaseLock`
+from `src/core/ledger.ts`). `isLockHeld` checks both the learn lock and the
+organize lock for R-6 coordination.
+
+**API routes:** `POST /api/learn/plan`, `POST /api/learn/apply`,
+`POST /api/learn/undo`. Mirror the organize route shape. `NO_LEDGER` → 404;
+`LOCK_HELD` → 409; other errors → 500.
+
+**UI surface:** `/organize` → Learn tab (second tab alongside Organize).
+Shared tabs layout chosen over a separate `/learn` route because both features
+share the preview → apply → undo workflow.
+
+**Non-goals for v1:** cross-cluster meta-summary (type B learnings), frontmatter
+writeback to source notes, periodic digest / cron mode. These are roadmap.
+
+**Submodule map:**
+
+| File | Role |
+|------|------|
+| `src/core/learn.ts` | Public entry: `buildLearnPlan`, `applyLearnPlan`, `undoLastLearn`, all types |
+| `src/core/learn/clusters.ts` | Cluster discovery (organize-ledger-aware + fallback folder scan) |
+| `src/core/learn/sourceHashes.ts` | Per-note SHA-256 hashing; existing summary frontmatter parser |
+| `src/core/learn/prompts.ts` | Ollama prompt template + `generatedSummarySchema` (zod) |
+| `src/core/learn/ollamaGenerator.ts` | Ollama `/api/generate` caller; validates with zod; returns null on any failure |
+| `src/core/learn/extractiveGenerator.ts` | Deterministic centroid-rank fallback; never throws |
+| `src/core/learn/render.ts` | `renderSummary()` — hand-crafted YAML frontmatter + markdown body |
+| `src/core/learn/ledger.ts` | Learn-specific JSONL types + ledger path helpers |
+| `src/core/ledger.ts` | Shared lock + hash helpers (`acquireLock`, `releaseLock`, `hashFile`, `isLockHeld`) |
+
 ### Auto-organize: `kb organize`
 
 Clusters notes into topical folders using a tag-first + embedding-cluster
-fallback scheme. Local model (Xenova/flan-t5-small) names clusters; falls
-back to TF-IDF if model unavailable. **No API key needed.**
+fallback scheme. Cluster folders are named via a three-tier chain:
+
+1. **Ollama** (if running at `http://localhost:11434` with a usable model) —
+   produces the best names. Zero setup if you already run Ollama.
+2. **Flan-T5-small** via `@huggingface/transformers` — fully local, ~80MB
+   one-time download.
+3. **TF-IDF** from top cluster terms — always works.
+
+**No API key needed.** Probe for Ollama is 500ms; cost of "Ollama not
+running" is negligible.
 
 - `kb organize` — dry-run, prints plan (no disk writes)
 - `kb organize --apply` — execute moves + link rewrites (transactional)
 - `kb organize --undo` — reverse the most recent applied organize
 - `kb organize --json` — machine-readable plan
-- `kb organize --no-llm` — force TF-IDF naming (skip model download)
+- `kb organize --no-llm` — force TF-IDF naming (skip all LLM tiers)
+- `kb organize --no-ollama` — skip the Ollama tier (Flan-T5 + TF-IDF only)
+- `kb organize --model <name>` — override Ollama model tag (default
+  `llama3.2`, which prefix-matches any installed `llama3.2:*` variant)
+- `kb organize --ollama-url <url>` — override Ollama base URL
 - `kb organize --exclude <glob>` — extend default carve-outs (repeatable)
 - `kb organize --min-confidence <n>` — override cluster threshold (default 0.35)
 - `kb organize --max-clusters <n>` — cap cluster count (default auto, max 20)
 - `kb organize --no-rewrite-links` — skip link rewriting pass
 - `kb organize --keep-empty-dirs` — don't sweep empty parents after moves
+
+Ollama config also honours env vars:
+
+- `KB_ORGANIZE_MODEL` — model tag (default `llama3.2`)
+- `KB_ORGANIZE_OLLAMA_URL` — base URL (default `http://localhost:11434`)
+- `KB_ORGANIZE_NO_OLLAMA=1` — skip Ollama entirely
 
 Baked-in carve-outs (never moved): dotfiles, `.trash/`, `.kb-index/`,
 `meta/`, `daily/`, notes with `organize: false` or `pinned: true` in
@@ -128,8 +266,8 @@ contentHash}` + `{kind:"link-rewrite", file, before, after, byteOffset}`.
 
 Implementation lives in `src/core/organize.ts` + `src/core/organize/`
 (cluster, classifier, carveouts, move, ledger, rewriteLinks, llmNaming,
-folderName). CLI in `src/cli/index.ts` (`organize` subcommand). No UI
-surface yet.
+ollamaNaming, folderName). CLI in `src/cli/index.ts` (`organize`
+subcommand). No UI surface yet.
 
 ### Generated artifact: `.kb-index/`
 
@@ -215,6 +353,10 @@ manually.
    toast reading exactly `KB_S3_BUCKET is not set. Configure it in .env to
    enable sync.` — NOT raw JSON (F2 regression check)
 10. `pnpm kb import <scratch-dir> --dry-run` prints a plan summary and lists entries
+11. `pnpm kb learn` on the seed KB prints a plan table (may show 0 eligible clusters
+    if no folder has ≥ 3 notes — that's valid; the command must not crash)
+12. `pnpm kb learn --apply --no-llm` on a folder with ≥ 3 notes writes `_summary.md`
+13. `pnpm kb learn --undo` reverses the most recent learn run (summaries move to `.trash/`)
 
 ## Dogfooding
 
@@ -284,9 +426,12 @@ bin/                       # tiny Node loaders for global install (no deps)
 .mcp.json                  # project-scoped MCP config, auto-loaded by Claude Code
 CLAUDE.md                  # redirect to AGENTS.md (Claude Code looks for this name)
 .nvmrc                     # Node version pin (24)
-src/core/                  # filesystem + search + sync + organize + types (pure Node)
+src/core/                  # filesystem + search + sync + organize + learn + types (pure Node)
+  ledger.ts                # shared lock + hash helpers (acquireLock, releaseLock, hashFile, isLockHeld)
   organize.ts              # auto-organize: buildOrganizePlan, apply, undo
-  organize/                # submodules: cluster, classifier, carveouts, move, ledger, rewriteLinks, llmNaming, folderName
+  organize/                # submodules: cluster, classifier, carveouts, move, ledger, rewriteLinks, llmNaming, ollamaNaming, folderName
+  learn.ts                 # learnings pipeline: buildLearnPlan, applyLearnPlan, undoLastLearn
+  learn/                   # submodules: clusters, sourceHashes, prompts, ollamaGenerator, extractiveGenerator, render, ledger
 src/app/                   # Next.js App Router
   layout.tsx               # root: ThemeProvider + Toaster, no shell
   globals.css              # Tailwind v4 + shadcn slate OKLCH vars + @plugin typography

@@ -31,8 +31,14 @@ export default async function NotePage({
     allNotes.map((n) => [n.path, n.title]),
   );
 
-  // Inbound refs pointing at the current note, sorted by source title (case-insensitive).
-  const inboundRefs = (linkIndex.inbound.get(note.path) ?? []).slice().sort(
+  // Inbound refs pointing at the current note, deduped by source path
+  // (a single source can link to this note multiple times — render one row
+  // per unique source), then sorted by source title (case-insensitive).
+  const inboundRefs = Array.from(
+    new Map(
+      (linkIndex.inbound.get(note.path) ?? []).map((ref) => [ref.from, ref]),
+    ).values(),
+  ).sort(
     (a, b) =>
       (titleByPath.get(a.from) ?? a.from)
         .toLowerCase()

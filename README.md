@@ -21,6 +21,18 @@ an API, or all three. This one doesn't. Your notes live in `./kb/` as
 markdown. You can edit them with `vim`, browse them with `cat`, version them
 with `git`, and let agents work on them via MCP — all at the same time.
 
+## Features
+
+- **Plain markdown on disk.** No database, no lock-in. `cat`/`grep`/`git`/`rsync` keep working.
+- **Semantic search, local.** Embeddings via [`@huggingface/transformers`](https://huggingface.co/docs/transformers.js) run in-process; vectors live next to your notes as JSONL sidecar (`.kb-index/`). Search is hybrid keyword + cosine (`score = 0.4·fts + 0.6·cosine`). Disable with `KB_SEMANTIC=off`.
+- **Wiki-link graph.** `[[note-name]]` resolves to backlinks; `/stats` surfaces orphans and broken links; `kb backlinks` / `kb orphans` expose the same from the CLI.
+- **Auto-organize.** `kb organize` clusters notes into topical folders using embeddings, with a naming chain (Ollama → Flan-T5-small → TF-IDF). Preview → apply → undo via a ledger.
+- **Cluster summaries (`learn`).** `kb learn` generates per-folder `_summary.md` files from cluster contents. Ollama-first, extractive fallback. Idempotent and reversible.
+- **MCP server.** Seven tools (`list_notes`, `read_note`, `write_note`, `delete_note`, `search_notes`, `sync_kb`, `get_tree`) so Claude / Cursor / any MCP client can work on the KB directly.
+- **CLI + web UI.** Full-fat `kb` CLI (`ls`, `cat`, `new`, `rm`, `search`, `tree`, `sync`, `import`, `organize`, `learn`, `info`, `find`, `backlinks`, `orphans`, `mcp`) plus a Next.js viewer with Miller-column browser, dark mode, and a Cmd+K palette.
+- **Optional S3 sync.** Two-way, newest-wins, `--dry-run` / `--push` / `--pull` / `--mirror`. Uses the standard AWS credential chain.
+- **Local-first, always.** No telemetry, no account, no external services required. Everything runs on your machine.
+
 ## Quickstart
 
 ```bash
@@ -228,7 +240,7 @@ three different transports for the same operations.
 ## Non-goals
 
 - Auth, accounts, multi-tenant
-- External database or hosted vector store (embeddings live on disk as sidecar JSONL)
+- **External** database or hosted vector store (Pinecone, Weaviate, pgvector, etc.). Embeddings are *local* — they live on disk as JSONL sidecar, computed in-process.
 - Attachments (PDFs, images, audio)
 - Realtime collaboration / CRDTs
 - Vercel deployment (this is local-only)

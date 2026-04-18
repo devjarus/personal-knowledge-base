@@ -3,6 +3,25 @@
   "version": "0.1.0",
   "private": true,
   "description": "Personal knowledge base — local markdown + S3 sync + MCP + CLI + web UI",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/devjarus/personal-knowledge-base.git"
+  },
+  "bugs": {
+    "url": "https://github.com/devjarus/personal-knowledge-base/issues"
+  },
+  "homepage": "https://github.com/devjarus/personal-knowledge-base#readme",
+  "keywords": [
+    "knowledge-base",
+    "markdown",
+    "notes",
+    "mcp",
+    "cli",
+    "s3",
+    "nextjs",
+    "local-first"
+  ],
   "bin": {
     "kb": "./bin/kb.mjs",
     "kb-mcp": "./bin/mcp.mjs"

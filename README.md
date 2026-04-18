@@ -1,5 +1,12 @@
 # personal-knowledge-base
 
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
+[![node: >=24](https://img.shields.io/badge/node-%3E%3D24-brightgreen.svg)](https://nodejs.org/)
+[![pnpm: >=9](https://img.shields.io/badge/pnpm-%3E%3D9-orange.svg)](https://pnpm.io/)
+[![CI](https://github.com/devjarus/personal-knowledge-base/actions/workflows/ci.yml/badge.svg)](https://github.com/devjarus/personal-knowledge-base/actions/workflows/ci.yml)
+
+> Local-first markdown knowledge base with a Next.js UI, an MCP server, and a `kb` CLI. Your notes are plain files; agents and humans share one source of truth.
+
 A local-first personal knowledge base. Plain markdown files in a folder. A
 small Next.js web UI on top. An MCP server so any agent can read and write it.
 A `kb` CLI for shell users. Optional S3 sync for multi-device.
@@ -17,10 +24,14 @@ with `git`, and let agents work on them via MCP — all at the same time.
 ## Quickstart
 
 ```bash
+git clone https://github.com/devjarus/personal-knowledge-base.git
+cd personal-knowledge-base
 pnpm install
 pnpm dev
 # open http://localhost:3000
 ```
+
+> Requires **Node.js 24+** and **pnpm 9+**. See [CONTRIBUTING.md](./CONTRIBUTING.md) for the full dev setup.
 
 The home page lists recent notes. Click `welcome.md` to read or edit it. The
 sidebar has a search box, a tree view, and sync buttons.
@@ -113,9 +124,6 @@ If you open this repo in Claude Code, the MCP server is already wired up via
 
 After `pnpm link --global` you can optionally change `.mcp.json` to use
 `"command": "kb-mcp", "args": []`, but the `pnpm mcp` form works without linking.
-
-For Claude Desktop, Cursor, or Claude Code sessions outside the repo, add the
-following to your MCP config:
 
 ### Claude Desktop / Cursor / Claude Code (outside repo)
 
@@ -212,10 +220,23 @@ The `core/` layer is the only thing that touches the filesystem. The web UI,
 MCP server, and CLI all sit on top of it. They share zero state — they're
 three different transports for the same operations.
 
+## Screenshots
+
+<!-- TODO: add screenshot of the Next.js viewer (home page + note view) -->
+<!-- TODO: add screenshot or asciinema of the `kb` CLI in action -->
+
 ## Non-goals
 
 - Auth, accounts, multi-tenant
-- Database, vector search, embeddings
+- External database or hosted vector store (embeddings live on disk as sidecar JSONL)
 - Attachments (PDFs, images, audio)
 - Realtime collaboration / CRDTs
 - Vercel deployment (this is local-only)
+
+## Project
+
+- [CONTRIBUTING.md](./CONTRIBUTING.md) — dev setup, commit conventions, PR checklist, releasing
+- [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md) — community standards
+- [CHANGELOG.md](./CHANGELOG.md) — release history
+- [AGENTS.md](./AGENTS.md) — architecture, invariants, coding rules
+- [LICENSE](./LICENSE) — MIT
